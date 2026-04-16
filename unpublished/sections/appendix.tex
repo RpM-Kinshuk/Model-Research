@@ -1,0 +1,424 @@
+\section{Appendix}\label{sec:appendix}
+
+\subsection{Metric Computation}
+
+In this section, we provide the detailed definitions of the metrics used in our analysis. 
+Let $\mathbf{W}$ represent the weight matrix.
+
+%\paragraph{ESD Norm.}
+%The Frobenius\_Norm (also referred to as \texttt{param\_norm}) is calculated as the sum of the squared Frobenius norms over all weight matrices:
+%\begin{equation}
+    %\mu_{\text{param\_norm}} = \sum_{i=1}^{d} \|\mathbf{W}_i\|_F^2.
+%\end{equation}
+
+
+
+\paragraph{Log\_Norm.}
+Log\_Norm is defined as the logarithm of the squared Frobenius norms:
+\begin{equation}
+    {\text{
+    Log\_Norm}} = \log \|\mathbf{W}\|_F^2.
+\end{equation}
+
+
+\paragraph{Log\_Alpha\_Norm.}
+This metric is a scale-adjusted metric based on the Schatten $p$-norm. Let $\{\lambda_j\}_{j=1}^M$ denote the set of eigenvalues of the correlation matrix $\mathbf{X} = \mathbf{W}^\top \mathbf{W}$, where $\mathbf{W}$ is an $N \times M$ weight matrix (assuming $N \ge M$). The Schatten $p$-norm is defined as:
+\begin{equation}
+    \|\mathbf{X}\|_p = \left( \sum_{j=1}^M \lambda_j^p \right)^{\frac{1}{p}}.
+\end{equation}
+The Log\_Alpha\_Norm metric is then given by:
+\begin{equation}
+    {\text{Log\_Alpha\_Norm}} =  \log \|\mathbf{X}\|_{\alpha}^{\alpha}.
+\end{equation}
+
+
+\paragraph{Spectral\_Norm.}
+The Spectral\_Norm focuses on the spectral properties of the weight matrices. Unlike the logarithmic version, here we compute the average squared spectral norm (operator norm) across all layers:
+\begin{equation}
+    \text{Spectral\_Norm} = \|\mathbf{W}\|_2^2,
+\end{equation}
+where $\|\mathbf{W}\|_2$ denotes the spectral norm of the matrix $\mathbf{W}$, which corresponds to its largest singular value.
+
+\subsection{Metrics for Classification Quality}\label{app:classification_metric}
+Given two signatures $\mathbf{Z}_1,\mathbf{Z}_2$, we consider:
+(i) Spearman rank correlation $\rho_s(\mathbf{Z}_1,\mathbf{Z}_2)$ as our default similarity (Eq.~\ref{eq:sr}),
+(ii) an RBF kernel applied to the signature distance (Eq.~\ref{eq:rbf}), 
+\begin{equation}
+k_{\text{RBF}}(\mathbf{Z}_1,\mathbf{Z}_2)=\exp\!\left(-\frac{\|\mathbf{Z}_1-\mathbf{Z}_2\|_2^2}{2\sigma^2}\right)
+\label{eq:rbf}
+\end{equation}
+, and
+(iii) cosine similarity (Eq.~\ref{eq:cos}).
+\begin{equation}
+k_{\cos}\mathbf({Z}_1,\mathbf{Z}_2)=\frac{\langle \mathbf{Z}_1,\mathbf{Z}_2\rangle}{\|\mathbf{Z}_1\|_2\|\mathbf{Z}_2\|_2}
+\label{eq:cos}
+\end{equation}
+
+
+
+\subsection{Metrics for Internal Clustering Validation}
+\label{app:eval_metrics_clustering}
+
+In the absence of ground truth labels for the unsupervised discovery of model families, we rely on internal validity indices to evaluate the quality of the clustering structures derived from spectral signatures. We employ two standard metrics: the Silhouette Coefficient and the Davies-Bouldin Index. Detailed definitions are provided below.
+
+\paragraph{Silhouette Coefficient }
+The Silhouette Coefficient evaluates the quality of clustering by measuring how similar an object is to its own cluster (cohesion) compared to other clusters (separation). For a data point $i \in C_k$ (where $C_k$ is a given cluster), let $a(i)$ be the average distance between $i$ and all other points in the same cluster, and let $b(i)$ be the minimum average distance from $i$ to all points in any other cluster $C_j$ (where $j \neq k$). The silhouette coefficient $s(i)$ is defined as:
+
+\begin{equation}
+    s(i) = \frac{b(i) - a(i)}{\max\{a(i), b(i)\}}
+\end{equation}
+
+The overall Silhouette Score is the mean of $s(i)$ across all samples.
+
+\paragraph{Davies-Bouldin Index}
+The Davies-Bouldin Index (DBI) signifies the average 'similarity' between clusters, where similarity is a measure that compares the distance between clusters with the size of the clusters themselves.
+
+Let $S_i$ be the intra-cluster dispersion (e.g., average distance of points to the centroid) of cluster $i$, and let $M_{ij}$ be the distance between the centroids of clusters $i$ and $j$. The similarity ratio $R_{ij}$ is defined as:
+
+\begin{equation}
+    R_{ij} = \frac{S_i + S_j}{M_{ij}}
+\end{equation}
+
+The Davies-Bouldin Index is defined as the average of the maximum similarity ratios for each cluster:
+
+\begin{equation}
+    DB = \frac{1}{k} \sum_{i=1}^{k} \max_{j \neq i} R_{ij}
+\end{equation}
+
+
+\subsection{Similarity within Modules}
+\label{sec:similarity_within_modules}
+Fig.~\ref{fig:module_heatmaps} shows module-wise Spearman similarity heatmaps computed from layer-wise \ALPHAHILL profiles.
+A clear contrast emerges between attention and MLP modules.
+For the attention Q projection, many cross-family pairs remain highly similar (e.g., open-llama-7b vs. llama-2-7b reaches $\mathrm{Sim} \approx 0.90$), resulting in a relatively weak separation between related and unrelated models.
+In contrast, the MLP up projection module exhibits a much sharper block-wise structure, where models derived from the same base family form high-similarity blocks, while similarities across families drop substantially.
+
+We hypothesize that this difference reflects the roles of the two components in Transformer weights.
+Attention projections are strongly constrained by shared architectural parameterization and generic token-mixing behavior, which can lead to similar spectral shapes even across independently trained models of comparable scale.
+MLP projections, however, are more directly responsible for feature transformation and information storage, and thus may encode more lineage-specific training signals, producing clearer family-level clusters in spectral space.
+
+For a model pool with $n$ models, we can derive a similarity matrix $S \in \mathbb{R}^{n\times n}$. To provide a concrete illustration of the spectral signature, we present a representative pair of models in Fig.~\ref{fig:SFViz}.
+
+
+\begin{figure}[tbh]
+    \centering
+    \includegraphics[width=\linewidth]{figs/signature/abbrev/attentionQ_SR.png}    \includegraphics[width=\linewidth]{figs/signature/abbrev/MLPup_SR.png}
+\caption{Module-wise spectral similarity heatmaps.
+\ALPHAHILL-SR signatures computed separately for (top) the attention Q projection and (bottom) the MLP projection module. }   \label{fig:module_heatmaps}
+\end{figure}
+
+
+%\begin{figure}[tbh]
+%\centering
+%\includegraphics[width=0.35\textwidth]{figs/signature/Llema7bFIT.png}
+%\includegraphics[width=0.35\textwidth]{figs/signature/OpenLlama7bFIT.png}
+%\caption{The spectral signatures of \ALPHAHILL values per layer and module. The two models were independently trained. }
+%\label{fig:SFViz}
+%\end{figure}
+
+
+\subsection{Additional Details on the Robustness of ESD Shape Metrics}
+\label{app:robust_esd}
+
+Pre-training and post-training processes inherently reshape the correlations within weight matrices, which are reflected in the variations of the heavy-tail index across layers. To validate the reliability of our method, we investigate whether the spectral structure preserves sufficient lineage information despite these post-training perturbations.
+
+\paragraph{\ALPHAHILL is robust under perturbation.} Fig.~\ref{fig:heatmap} shows that ESD shape metrics can encode lineage information beyond pretraining.
+Using Spearman correlation between layer-wise \ALPHAHILL profiles, models derived from the same 7B base checkpoint form clear high-similarity blocks, whereas similarities across base families are substantially lower.
+Moreover, within the Llama-2 lineage, we observe finer sub-structure: distinct clusters align with different post-training trajectories (e.g., instruction-tuned vs. CodeLlama-style derivatives), suggesting that post-training alters spectral signatures in a structured manner. These observations motivate our use of spectral signatures for downstream tasks such as lineage attribution, clustering, and performance prediction (Sec.\ref{sec:results}).
+
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\linewidth]{figs/signature/abbrev/AverageSR.png}
+    \caption{Heatmap of spectral signature similarity across models derived from different 7B base models. The pairwise similarity is measured by Spearman's rank correlation of \ALPHAHILL. Entries are color-coded on the axes to indicate the base model. Specifically, different shades of green represent models derived from Llama-2-7b. While dark green denotes the ones directly fine-tuned from the Llama-2-7B family, light green identifies the CodeLlama-7B-hf sub-family. The emergence of distinct clusters aligned with these color markers demonstrates that spectral signatures are highly sensitive to ancestral relations, even after diverse fine-tuning trajectories. We provide the full name list for the abbreviations in Tab.~\ref{tab:model_abbreviations}.}
+    \label{fig:heatmap}
+\end{figure}
+
+
+\paragraph{The Forging of Spectral Signature}
+As illustrated in Fig. ~\ref{fig:forge}, we observe three distinct phases of spectral evolution:
+\begin{enumerate}
+\item \textbf{Initialization.} At Step 0, all layers exhibit large, uniform \ALPHAHILL values ($\alpha \approx 2.1$ for attention weight matrices and $\alpha \approx 3.5$ for MLP weight matrices, due to the aspect ratio of weight matrices~\cite{hu2025eigenspectrum}), resembling random matrices with no structural identity.
+\item \textbf{Formulation.} As training progresses, $\alpha$ decreases globally, signifying the accumulation of information. Crucially, a distinct layer-wise topology emerges: \ALPHAHILL drop significantly in early layers (feature extraction), flatten in middle layers, dip in mid-deep layers, and rise in the final layers.
+\item \textbf{Stabilization} As shown in the temporal similarity heatmap (Fig. ~\ref{fig:heatmappythia}), the spectral signature stabilizes rapidly. While the early phase ($<16k$ steps) shows high volatility, the signature ``locks in'' after step 16,000. Subsequent updates (from 16k to 143k) refine the weights but do not alter the fundamental topological shape.
+\end{enumerate}
+
+\noindent\paragraph{\ALPHAHILL undergo minimal change during post-training.}
+Because post-training updates (e.g., supervised fine-tuning and reinforcement learning from human feedback) typically introduce relatively small changes in parameter space, they are unlikely to erase the heavy-tailed structure established during pre-training. Based on that, \ALPHAHILL\ is promising to work as a stable and lineage-preserving signature: it is sensitive to the underlying architecture and pre-training data, but remains robust to common downstream adaptations and moderate noise. This motivates our use of ESD-based metrics for both performance prediction and model attribution.
+
+
+\begin{figure}
+   \centering
+   \includegraphics[width=0.9\linewidth]{figs/Pythia/layerwise_alpha_evolution.png}
+   \caption{The evolution of layer-wise \ALPHAHILL through the training process. The values of \ALPHAHILL are averaged within Attention modules and MLP modules.}
+   \label{fig:forge}
+\end{figure}
+
+\begin{figure}
+   \centering
+   \includegraphics[width=0.9\linewidth]{figs/Pythia/orderedpythia.png}
+   \caption{The heatmap of the Spearman rank between \ALPHAHILL signatures of pythia-1b models with training steps ranging from step 0 to step 143,000.}
+   \label{fig:heatmappythia}
+\end{figure}
+
+
+%%%%%%%%%%%%%%%%%%
+\begin{table}[htbp]
+    \centering
+    \caption{Mapping of Model Abbreviations to Full Model Names}
+    \label{tab:model_abbreviations}
+    \renewcommand{\arraystretch}{1.2} % Increase row spacing slightly
+    \resizebox{0.95\columnwidth}{!}{%
+    \begin{tabular}{@{}ll@{}}
+        \toprule
+        \textbf{Abbreviation} & \textbf{Full Model Name} \\ 
+        \midrule
+        OLam1 & \texttt{openlm-research/open\_llama\_7b} \\
+        OLam2 & \texttt{openlm-research/open\_llama\_7b\_v2} \\
+        \addlinespace % Adds a little vertical space between groups
+        CLam-I-S & \texttt{AlfredPros/CodeLlama-7b-Instruct-Solidity} \\
+        CLam & \texttt{codellama/CodeLlama-7b-hf} \\
+        CLam-I & \texttt{codellama/CodeLlama-7b-Instruct-hf} \\
+        CLam-P & \texttt{codellama/CodeLlama-7b-Python-hf} \\
+        Lem & \texttt{EleutherAI/llemma\_7b} \\
+        Lem-M & \texttt{EleutherAI/llemma\_7b\_muinstruct\_camelmath} \\
+        Vic1.5 & \texttt{lmsys/vicuna-7b-v1.5} \\
+        NH-Lam2 & \texttt{NousResearch/Nous-Hermes-llama-2-7b} \\
+        Orca-2 & \texttt{microsoft/Orca-2-7b} \\
+        Lam2-I-L & \texttt{lvkaokao/llama2-7b-hf-instruction-lora} \\
+        Lam2-L & \texttt{oh-yeontaek/llama-2-7B-LoRA-assemble} \\
+        Lam2 & \texttt{meta-llama/Llama-2-7b-hf} \\
+        \addlinespace
+        Alp & \texttt{wxjiao/alpaca-7b} \\
+        Alp-L & \texttt{chainyo/alpaca-lora-7b} \\
+        Lam & \texttt{luodian/llama-7b-hf} \\
+        Vic1.1 & \texttt{lmsys/vicuna-7b-v1.1} \\
+        \addlinespace
+        Gran-B & \texttt{ibm-granite/granite-7b-base} \\
+        Gran-I & \texttt{ibm-granite/granite-7b-instruct} \\
+        \bottomrule
+    \end{tabular}}
+\end{table}
+
+
+\subsection{Additional Results on Model Clustering}
+
+
+In Fig.~\ref{fig:sim_bar}, we show a t-SNE visualization of a 2D embedding for spectral clustering on \ALPHAHILL with ground truth cluster labels.
+
+\begin{figure}[t]    
+    \centering
+    \includegraphics[width=0.8\columnwidth]{figs/Clustering/tsne_spectral_alpha.pdf}
+    \includegraphics[width=0.8\columnwidth]{figs/Clustering/tsne_spectral_alpha_legend.pdf}
+    \caption{t-SNE 2D embedding for spectral clustering on \ALPHAHILL with ground truth cluster labels.}
+    \label{fig:sim_bar}    
+\end{figure}
+
+% \begin{table}[h]
+% \centering
+% \caption{Alpha: cluster membership counts.}
+% \label{tab:alpha_clusters}
+% \resizebox{\columnwidth}{!}{%
+%     \begin{tabular}{lcc}
+%     \toprule
+%     \textbf{source\_model} & \textbf{cluster\_label} & \textbf{count} \\
+%     \midrule
+%     llama-7b & 0 & 29 \\
+%     mistralai--Mistral-7B-Instruct-v0.2 & 1 & 19 \\
+%     mistralai--Mistral-7B-v0.1 & 1 & 12 \\
+%     openlm-research--open\_llama\_7b & 2 & 8 \\
+%     openlm-research--open\_llama\_7b\_v2 & 2 & 4 \\
+%     meta-llama--Llama-3.1-8B-Instruct & 3 & 19 \\
+%     meta-llama--Llama-2-7b-hf & 4 & 27 \\
+%     Qwen--Qwen1.5-7B & 5 & 18 \\
+%     \bottomrule
+%     \end{tabular}%
+% }
+% \end{table}
+% \begin{table}[h]
+% \centering
+% \caption{Log Alpha Norm: cluster membership counts.}
+% \label{tab:log_alpha_norm_clusters}
+% \resizebox{\columnwidth}{!}{%
+%     \begin{tabular}{lcc}
+%     \toprule
+%     \textbf{source\_model} & \textbf{cluster\_label} & \textbf{count} \\
+%     \midrule
+%     llama-7b & 0 & 27 \\
+%     llama-7b & 1 & 1 \\
+%     mistralai--Mistral-7B-Instruct-v0.2 & 1 & 19 \\
+%     mistralai--Mistral-7B-v0.1 & 1 & 12 \\
+%     llama-7b & 2 & 1 \\
+%     meta-llama--Llama-2-7b-hf & 2 & 2 \\
+%     openlm-research--open\_llama\_7b & 2 & 8 \\
+%     openlm-research--open\_llama\_7b\_v2 & 2 & 4 \\
+%     meta-llama--Llama-2-7b-hf & 3 & 25 \\
+%     meta-llama--Llama-3.1-8B-Instruct & 3 & 1 \\
+%     meta-llama--Llama-3.1-8B-Instruct & 4 & 18 \\
+%     Qwen--Qwen1.5-7B & 5 & 18 \\
+%     \bottomrule
+%     \end{tabular}%
+% }
+% \end{table}
+
+% \begin{table}[h]
+% \centering
+% \caption{Log Norm: cluster membership counts.}
+% \label{tab:log_norm_clusters}
+% \resizebox{\columnwidth}{!}{%
+%     \begin{tabular}{lcc}
+%     \toprule
+%     \textbf{source\_model} & \textbf{cluster\_label} & \textbf{count} \\
+%     \midrule
+%     llama-7b & 0 & 28 \\
+%     meta-llama--Llama-2-7b-hf & 0 & 2 \\
+%     meta-llama--Llama-3.1-8B-Instruct & 0 & 1 \\
+%     openlm-research--open\_llama\_7b & 0 & 8 \\
+%     openlm-research--open\_llama\_7b\_v2 & 0 & 4 \\
+%     mistralai--Mistral-7B-Instruct-v0.2 & 1 & 19 \\
+%     mistralai--Mistral-7B-v0.1 & 1 & 12 \\
+%     meta-llama--Llama-3.1-8B-Instruct & 2 & 18 \\
+%     Qwen--Qwen1.5-7B & 3 & 18 \\
+%     llama-7b & 4 & 1 \\
+%     meta-llama--Llama-2-7b-hf & 4 & 25 \\
+%     \bottomrule
+%     \end{tabular}%
+% }
+% \end{table}
+
+
+
+
+
+\subsection{Additional Results on Performance Predictions}
+
+Fig.~\ref{fig:scatter} compares predicted benchmark scores with their ground-truth values. The points cluster closely around the diagonal ($y=x$), indicating good agreement between predicted and actual performance.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.6\linewidth]{figs/BM_Pred/ARC_scatter.pdf}
+    \caption{A scatter plot of predicted and ground-truth ARC scores across the model pool.}
+    \label{fig:scatter}
+\end{figure}
+
+
+\subsection{Additional Details on Robustness to Output-invariant Reparameterization.}\label{attack}
+
+% In this section, we rigorously evaluate the robustness of our spectral signature, \ALPHAHILL, against output-invariant transformations and random weight perturbations. We further discuss the practical implications of these properties for model fusion and distillation detection.
+
+We first evaluate whether our spectral signature \ALPHAHILL is stable under output-invariant reparameterizing transformations that preserve the model’s input-output function for all inputs. 
+
+Consider a standard Transformer layer with self-attention and feed-forward networks (FFN):
+%
+\begin{equation}
+H'_{attn}=softmax(\frac{H_n W_Q (H_n W_K)^T}{\sqrt{d}})H_nW_VW_O
+\label{attn}
+\end{equation}
+%
+\begin{equation}
+    H'_{n+1}= \mathrm{FFN}(H'_{attn}) = \sigma(H'_{attn} W_1 + b_1) W_2 + b_2
+    \label{ffn}
+\end{equation}
+%
+Based on these structures, we consider two representative classes of reparameterizations.
+
+% \begin{enumerate}
+%     \item  \textbf{Linear Chains}
+\textbf{Linear Chains.}
+Consider a sequence of linear maps $W_1, W_2, \dots, W_L$ without introducing non-linearality. Scaling each matrix as: 
+\begin{equation}
+W'_i = c_i W_i 
+\label{eq: randomscale}
+\end{equation}
+
+The overall linear map would be preserved as long as $\prod_{i=1}^Lc_i = 1$.
+In a Transformer layer, we notice that $W_Q, W_K$ and $W_V, W_O$ form two such linear pairs in Eq.~\ref{attn}. We apply balanced scaling to each pair so that the attention output remains unchanged.
+The \ALPHAHILL is derived from the ESD of the Gram matrix, which depends on the distribution of eigenvalues rather than their absolute magnitude. As a result, \ALPHAHILL is invariant to balanced re-scaling within linear chains and remains stable under such output-invariant scaling.
+
+\textbf{Permutation on Hidden Units.}
+Due to the symmetry of fully-connected layers, the hidden units of a two-layer FFN can be permuted without changing the input-output function, as long as the permutation is applied consistently. Let $P$ be a permutation matrix. Eq.~\ref{ffn} remains unchanged under:
+
+\[
+W'_1 = P W_1, \quad
+W'_2 = W_2 P^{-1}, \quad
+b'_1 = P b_1 .
+\]
+
+This transformation corresponds to a similarity transform on the associated Gram matrices. Since permutation matrices are orthogonal, i.e., $P^{-1} = P^\top$, the singular values of the Gram matrix, and hence its ESD remain identical.
+As a result, all ESD-based metrics, including \ALPHAHILL, are exactly invariant under hidden-unit permutations.
+We note that this setting differs from post-hoc neuron matching approaches (e.g., via the Hungarian algorithm~\cite{zhu2025independence}), as the permutation considered here preserves the model function by construction.
+
+% \end{enumerate}
+
+
+\paragraph{Experimental Setup.}
+We conduct our analysis on the pre-trained Llama-2-7b model using the following reparameterization formulations.
+
+\textbf{Random Scaling.} To simulate a ``disguised'' linear chain, we multiply the weight matrix pairs by random numbers, as defined in Eq.~\ref{eq: randomscale}. We draw a log-scale value $z \sim \mathcal{N}(0, 1)$ and define a scaling factor $a = \exp(\gamma z)$ controlled by strength $\gamma$. The weights are updated as $Q' = a Q, K' = K/a$ (and similarly for $V, O$).
+
+\textbf{Permutation on Hidden Units.}
+For each layer, we generate a random permutation matrix $P$ and construct a transformed weight set 
+\[
+W' = \{P W_{gate}, P W_{up}, W_{down} P^{-1}\}
+\]
+
+
+
+\paragraph{Results.}
+We compare two similarity metrics between the original weights $W$ and transformed weights $W'$.
+
+\textbf{Naive Metric:} Layer-wise Cosine Similarity, which assumes coordinate alignment. Specifically, we use the resemblance definition of similarity in ~\cite{zeng2024HuRef}. The weight matrix of each layer is viewed as a vector and then concatenated. We compute the cosine similarity between two giant vectors from two models.
+
+\textbf{Spectral Metric:} The difference in the spectral signature. Specifically, for each module (e.g, attention Q), we extract the layer-wise spectral metrics. The resulting metrics are treated as a vector with $L$ entries. The similarity of a module between two models are defined by the vector cosine similarity. The similarities of such module pairs are then averaged as the final similarity between models. In our setting, we select \texttt{\ALPHAHILL, norm, log norm, spectral norm} as the spectral metrics.
+
+\textbf{Invariant Terms:} To mitigate the effect of output-invariant reparameterizations, we introduce the invariant terms. Specifically, we can utilize the symmetric attribution of the transformer networks by multiplying such weight matrices. For the linear chains, we introduce:
+    \[
+    M_a = W_QW_K \quad \text{or} \quad M_a=W_VW_O.
+    \]
+    For the permuted hidden units, we introduce:
+    \[
+    M_b=W_1W_2.
+    \]
+
+
+% The results of random scaling on linear chains are visualized in Fig. \ref{fig:results}. The results of permuting hidden units are demonstrated in table \ref{tab:ffn}
+
+% As predicted by our theoretical framework, the Weight Cosine Similarity is highly sensitive to the permutation, dropping to low values. Conversely, the spectral metric \ALPHAHILL shows near-perfect stability. This confirms that spectral signatures capture the intrinsic geometry of the model, while Euclidean metrics are easily fooled by output-invariant symmetries.
+
+\subsection{Additional Details on Stability under Random Perturbations}\label{app:noise}
+
+To rigorously evaluate the stability of our spectral signatures (\ALPHAHILL), we apply controlled random perturbations to pretrained weights. This experiment is designed to simulate the post-training process, assessing whether the heavy-tailed signature is a robust topological feature or a fragile artifact of specific floating-point parameter values.
+% We will have a test on the alpha metric with random noise on weight matrices to mimic the post-tuning process. We will see that the noise does not change the alpha metric. We will see a pretty similar ESD performance due to the robustness of alpha. 
+\paragraph{Setup.}
+For every weight matrix $W_\ell$ in the model, we first compute its entry-wise standard deviation $\mathrm{std}(W_\ell)$, then sample a standard Gaussian matrix $Z_\ell \sim \mathcal{N}(0, I)$ of the same shape.
+We define the unit perturbation as
+\begin{equation}
+\Delta W_\ell = \mathrm{std}(W_\ell)\, Z_\ell,
+\end{equation}
+and obtain a noise-perturbed model at scale $\gamma$ by
+\begin{equation}
+W_\ell^{(\gamma)} = W_\ell + \gamma \Delta W_\ell,
+\end{equation}
+where $\gamma$ controls the relative noise strength.
+We pre-generate and store $\{\Delta W_\ell\}_\ell$ once, and reuse the same unit adapter across different $\gamma$ values to enable controlled comparisons.
+
+% For every weight matrix $W$ in the model, we inject additive Gaussian noise scaled by the matrix's energy. Formally, the perturbed matrix $\tilde{W}$ is defined as:
+
+% \[\tilde{W} = W + \epsilon, \quad \epsilon \sim \mathcal{N}(0, \sigma^2 \cdot ||W||_F^2)\]
+
+% Here, $||\cdot||_F$ denotes the Frobenius norm, and $\sigma$ represents the relative noise intensity. By scaling the noise variance with $||W||_F^2$, we ensure that the Signal-to-Noise Ratio remains consistent across layers of varying magnitudes, preventing the perturbation from disproportionately destroying layers with smaller weight scales. We vary the noise intensity $\sigma$ on a logarithmic scale from $10^{-2}$ to $10^{1}$. For each noise level, we recompute the layer-wise ESD metrics (specifically \ALPHAHILL) to track the trajectory of spectral degradation.
+
+% \paragraph{ESD signatures remain robust under noise perturbations.}
+% We first examine the global stability of the spectral metric. Fig.~\ref{fig:trend_noise} shows the relative change in the \ALPHAHILL-SR between the masked and original model as noise intensity increases. We observe that for noise levels $\sigma < 0.5$ the \ALPHAHILL-SR remains close to $1$. This confirms that the heavy-tailed signatures are not fragile artifacts of specific weight values but are robust topological features supported by the deep correlations within the model.
+
+
+
+
+% \paragraph{Model Fusion and Distillation.}
+
+% The robustness of our spectral signature allows for reliable independence testing, which is critical for downstream applications such as model fusion and detecting knowledge distillation. We highlight two specific use cases:
+
+% \begin{enumerate}
+%     \item Multiple models simultaneous testing: we only want to perform model fusion among those models that are sufficiently independent, otherwise fusion two identical models (i.e., perfectly correlated hence not indepdent) is a waste of efforts. The Independence tests for LLMs can be used for screening. 
+%     \item Distillation detection: It is a common practice to extract other LLMs' knowledge using distillation. One can try to fine tune the model to avoid the accusation of distillation-based training.  The Independence tests for LLMs can be used to detect/avoid distillation training. 
+% \end{enumerate}

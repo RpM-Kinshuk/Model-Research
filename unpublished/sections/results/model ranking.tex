@@ -1,0 +1,127 @@
+\subsection{Quantifying and Ranking LLM Performance}
+\label{sec:results_eval_performance}
+
+\paragraph{Model Corpus.} For model ranking and prediction tasks, we curate 499 open-source models from the Open LLM Leaderboard~\cite{myrzakhan2024openllmleaderboard}. This corpus spans a broad spectrum of architectures, primarily focusing on the Llama, Mistral, GPT, and Pythia families, with parameter scales ranging from 19 million to 70 billion.
+ 
+\paragraph{Setup.} 
+To evaluate the ability of spectral signatures to predict downstream performance, we consider four representative benchmarks: ARC-Challenge (reasoning)~\cite{clark2018thinksolvedquestionanswering}, HellaSwag (commonsense)~\cite{zellers-etal-2019-hellaswag}, MMLU (world knowledge)~\cite{hendrycks2021measuring}, and TruthfulQA (factuality)~\cite{lin-etal-2022-truthfulqa}. The models exhibit a wide variance in performance (e.g., MMLU scores ranging from 23.0 to 70.67), ensuring that our prediction task covers both low- and high-performance regimes. 
+
+For each model, we estimate its performance through distance-weighted $k$-NN interpolation ($k=3$) based on the similarity of spectral signatures. We employ a 5-fold cross-validation scheme to ensure the generalization of our results. 
+Additionally, we use EmbedLLM~\cite{zhuang2025embedllm} as a strong activation-based baseline for performance quantification. Given a fixed prompt set $\mathcal{P}$, EmbedLLM encodes each model by extracting the hidden-state embedding at the final token position from the last transformer layer. A linear regression is trained on these embeddings to predict benchmark with leave-one-out algorithm. 
+
+We evaluate prediction quality using Mean Absolute Error (MAE) and Kendall’s Tau rank correlation~\cite{kendall1948rank}. We use ``Significance'' as the number of repeated random train/test splits (out of 100) for which the Kendall’s Tau correlation between predicted and ground-truth rankings is statistically significant at the 5\% level.
+%
+\emph{Why spectral signatures are suitable here.} Benchmarking or activation-based embeddings require task data and inference, and do not scale well to frequent re-ranking across large model collections. Conversely, weight-only fingerprints such as \textsc{PCS}~\cite{zeng2024HuRef} and matrix-level verification methods such as \textsc{AWM}~\cite{zeng2025awm} are primarily designed for identity/provenance checks and do not naturally provide a compact, geometry-aware representation amenable to regression across heterogeneous architectures. Our spectral signatures provide a lightweight, task-agnostic representation that supports nearest-neighbor interpolation without any prompts.
+
+\paragraph{Results.}
+We run 100 repeated trials with random train/test splits (249 models for training and 250 models for testing in each trial). 
+%Using \ALPHAHILL-SR as the spectral signature, we predict benchmark performance and summarize results in the Appendix (Tab.~\ref{tab:prediction}). 
+We report (i) the average MAE over the 100 trials, which measures absolute prediction error, and (ii) the number of trials in which Kendall's Tau correlation between predicted and ground-truth rankings on the test set is statistically significant. As shown in Tab.~\ref{tab:significance}, across all benchmarks, spectral signatures achieve consistently low MAE and exhibit statistically significant rank correlation in all trials, indicating reliable prediction performance. While EmbedLLM achieves slightly lower MAE on ARC and TruthfulQA, spectral signatures outperform EmbedLLM on MMLU and remain competitive on HellaSwag. Notably, these results are obtained without using any task data or model inference, whereas EmbedLLM relies on data-driven embeddings. This comparison shows that compact and data-free spectral signatures can match the predictive accuracy of data-aware methods, offering a practical and scalable alternative for performance estimation in large LLM collections.  Computationally, after one-time signature extraction per model, kNN prediction only requires distances in a small signature space rather than repeated forward passes over prompt sets.
+
+
+\begin{table*}[t!]
+\centering
+\small
+\setlength{\tabcolsep}{3pt} 
+\caption{KNN Interpolation Inverse Benchmark Results. Light gray rows indicate \textbf{cosine} correlation, and dark gray rows indicate \textbf{sr} (spearman rank) correlation. \puren{move to appendix. compute significance (low priority)}}
+\label{tab:knn_benchmark}
+\begin{tabular}{llcccccccccc}
+\toprule
+\multirow{2}{*}{\textbf{Spectral Metric}} & \multirow{2}{*}{\textbf{Corr.}} & \multicolumn{2}{c}{\textbf{ARC}} & \multicolumn{2}{c}{\textbf{HellaSwag}} & \multicolumn{2}{c}{\textbf{MMLU}} & \multicolumn{2}{c}{\textbf{TruthfulQA}} & \multicolumn{2}{c}{\textbf{AVG}} \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-6} \cmidrule(lr){7-8} \cmidrule(lr){9-10} \cmidrule(lr){11-12}
+& & MAE & L2 & MAE & L2 & MAE & L2 & MAE & L2 & MAE & L2 \\
+\midrule
+
+% LOGALPHANORM
+\rowcolor{lightgray}
+\cellcolor{white} & Cosine & 2.7214 & 5.0183 & 3.5390 & 8.1781 & 2.4005 & 5.0313 & 3.2106 & 4.5918 & 2.9679 & 5.7049 \\
+\rowcolor{gray!40}\cellcolor{white}
+\multirow{-2}{*}{\textbf{\LOGALPHANORM}} & SR & \textbf{2.3631} & 4.2394 & 3.1378 & 7.1477 & \textbf{2.0581} & \textbf{3.9478} & 2.8943 & \textbf{3.9806} & 2.6133 & 4.8289 \\
+
+\midrule
+
+% SPECTRALNORM
+\rowcolor{lightgray}
+\cellcolor{white} & Cosine & 2.4795 & 4.3207 & 3.2681 & 7.3216 & 2.2043 & 4.2811 & 2.9508 & 4.2193 & 2.7257 & 5.0357 \\
+\rowcolor{gray!40}\cellcolor{white}
+\multirow{-2}{*}{\textbf{\SPECTRALNORM}} & SR & 2.4608 & 4.2978 & 3.1511 & 7.0622 & 2.1499 & 4.0816 & 2.9752 & 4.2247 & 2.6843 & 4.9166 \\
+
+\midrule
+
+% STABLERANK
+\rowcolor{lightgray}
+\cellcolor{white} & Cosine & 2.3640 & \textbf{4.0669} & \textbf{2.9647} & \textbf{6.6716} & 2.1998 & 4.2833 & \textbf{2.8346} & 4.1694 & \textbf{2.5908} & \textbf{4.7978} \\
+\rowcolor{gray!40}\cellcolor{white}
+\multirow{-2}{*}{\textbf{\STABLERANK}} & SR & 2.4395 & 4.1770 & 3.1925 & 7.2703 & 2.1719 & 4.1112 & 2.9559 & 4.0674 & 2.6899 & 4.9065 \\
+
+\midrule
+
+% ALPHAHILL
+\rowcolor{lightgray}
+\cellcolor{white} & Cosine & 2.4679 & 4.3566 & 3.2265 & 7.3764 & 2.0640 & 4.0893 & 3.0459 & 4.3151 & 2.7011 & 5.0344 \\
+\rowcolor{gray!40}\cellcolor{white}
+\multirow{-2}{*}{\textbf{\ALPHAHILL}} & SR & 2.4581 & 4.3531 & 3.3280 & 7.6495 & 2.0972 & 4.0130 & 3.0366 & 4.2528 & 2.7300 & 5.0671 \\
+
+\bottomrule
+\end{tabular}
+\label{tab:prediction}
+\end{table*}
+\paragraph{Computational Cost.}
+We report a direct runtime between our spectral signature and the activation-based baseline EmbedLLM under the same model and hardware settings. We use Llama-2-7b as the representative backbone and run both methods on a single NVIDIA L40 GPU with FP16 precision. For EmbedLLM, we follow the original pipeline and extract last-token hidden-state embeddings on a fixed prompt set.
+For our method, we compute the spectral signatures directly from model weights without any forward passes. We measure \textit{Run Time} from the end of loading to the end of signature/embedding extraction. The Runtime of Spectral Signature is 337 seconds, while one iteration of EmbedLLM embeddings takes 2633 seconds.
+
+
+\begin{table}[t]
+\centering
+\caption{Performance prediction results on four benchmarks, comparing our spectral signature and EmbedLLM in terms of MAE and statistical significance.}
+\label{tab:robustness_knn_embedllm}
+\setlength{\tabcolsep}{6pt}
+\renewcommand{\arraystretch}{1.1}
+\resizebox{0.9\columnwidth}{!}{%
+\begin{tabular}{lcccc}
+\toprule
+& \multicolumn{2}{c}{\textbf{Spectral Signatures}} 
+& \multicolumn{2}{c}{\textbf{EmbedLLM}} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+\textbf{Benchmark} & \textbf{MAE} & \textbf{Significance} & \textbf{MAE} & \textbf{Significance} \\
+\midrule
+ARC       & 2.27 & 100 & 1.61 & 100 \\
+HellaSwag  & 3.25 & 100 & 3.50 & 100 \\
+MMLU      & 1.95 & 100 & 3.14 & 100 \\
+TruthfulQA & 2.99 & 100 & 1.96 & 100 \\
+\bottomrule
+\end{tabular}}
+\label{tab:significance}
+\end{table}
+
+%\begin{table}[t]
+%\centering
+%\caption{Computational cost comparison between our spectral Signature and EmbedLLM under the same model and hardware.}
+%\setlength{\tabcolsep}{7pt}
+%\renewcommand{\arraystretch}{1.15}
+%\resizebox{0.8\columnwidth}{!}{%
+% \begin{tabular}{lcccc}
+% \toprule
+% \textbf{Method} & \textbf{Load Time (s)} & \textbf{Run Time (s)} & \textbf{Total (s)} & \textbf{Peak GPU (GB)} \\
+% \midrule
+% EmbedLLM
+% &  &  &  &  \\
+% Spectral Signature
+% & 3.57 & 337.11 & 14.91 & 16.19 \\
+% \bottomrule
+% \end{tabular}}
+%\begin{tabular}{lcc}
+%\toprule
+% & \textbf{Spectral Signatures} & \textbf{EmbedLLM} \\
+%\midrule
+%Load Time (s) & 3 & 3 \\
+%Run Time (s) & 337 & 2633 \\
+% Total Time (s) & 14.91 & \\
+% Peak GPU (GB) & 16.19 & \\ 
+%\bottomrule
+%\end{tabular}}
+%\label{tab:cost}
+%\end{table}
+
+
+

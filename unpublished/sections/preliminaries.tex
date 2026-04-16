@@ -1,0 +1,31 @@
+\section{Preliminaries and Design Requirements}\label{sec:preliminary}
+
+\paragraph{Problem Setting.}
+In large LLM repositories, many checkpoints share a common pretrained backbone but differ due to post-training (SFT/RLHF), distillation, pruning/quantization, or merges. Our goal is \emph{data-free} lineage analysis: compare models and trace backbone relationships from weights alone. This requires robustness to output-(near-)invariant transformations (e.g., uniform scaling, hidden-unit permutations, and linear-chain reparameterizations) that can invalidate naive weight-space similarity; we therefore focus on spectral \emph{shape} statistics of weight matrices that are naturally stable under such symmetries (and we stress-test these robustness requirements in Sec.~\ref{sec:result_llm_lineage}).
+
+\paragraph{Weight Analysis with HT-SR Theory.}
+HT-SR theory~\citep{martin2021implicit} demonstrates the empirical fact that well-trained neural networks tend to exhibit strong correlations in weight matrices, resulting in a heavy-tailed Empirical Spectral Density (ESD) of each weight matrix. ESD characterizes the eigenvalue distribution of the correlation matrix $\mathbf{W}^{\top}\mathbf{W}$ of the weight matrix $\mathbf{W}$. HT-SR theory can be used to analyze the dynamics of weight matrix ESDs during training, by modeling the tail component of the ESD with a power-law (PL) distribution within the interval $(\lambda_{min}, \lambda_{max})$, and its tail index $\alpha$:
+\begin{equation}
+    p(\lambda) \propto \lambda^{-\alpha}, \quad \lambda_{min} < \lambda < \lambda_{max}
+\end{equation}
+One commonly used method to approximate the tail index $\alpha$ is with the Hill Estimator~\citep{hill1975simple}, which computes an estimate \ALPHAHILL:
+\begin{equation}
+    \text{\ALPHAHILL} = 1 + \frac{k}{\sum_{k=1}^{n}\operatorname{ln}\frac{\lambda_{n-i+1}}{\lambda_{n-k}}}
+\end{equation}
+Where $\{\lambda_i\}_{i=1}^n$ is sorted in ascending order. For the selection of $k$, we adopt the approach from previous works~\citep{zhou2023temperature, yang2023test}, where we set $k=\frac{n}{2}$. \ALPHAHILL measures the shape of the eigenspectrum of each layer individually. Unlike norm-based metrics such as the spectral norm or RMS norm, \ALPHAHILL is robust under scaling. Moreover, since permutations are orthogonal changes of basis, the spectrum of $\mathbf{W}^{\top}\mathbf{W}$ (and hence its ESD shape) is invariant to hidden-unit permutations, motivating \ALPHAHILL as a stable building block for our spectral signatures (Sec.~\ref{sec:signature_formulation}).
+
+\ALPHAHILL measures the dynamics of the ESD shape, and previous works~\citep{yang2023test, liu-etal-2024-model} have shown that \ALPHAHILL reflects the training quality of different layers. Layers with larger \ALPHAHILL tend to be ``overtrained'', while layers with smaller \ALPHAHILL tend to be relatively ``undertrained''.
+
+
+% \subsection{Robustness of ESD Shape Metrics in Post-training}\label{sec:shape_metric_robustness}
+\paragraph{Robustness of ESD Shape Metrics in Post-training.}
+A critical prerequisite for a spectral signature to serve as a reliable lineage identifier is its persistence across downstream adaptations. We validate the robustness of the layer-wise \ALPHAHILL as a spectral signature by examining its stability under post-training transformations. We observe that the impact of post-training on the weight ESD is minimal; the spectral signature is predominantly shaped during the pre-training phase. As shown in Fig. ~\ref{fig:esd_layer10_llama}, the spectral signature exhibits distinct behaviors for intra-family and inter-family comparisons. We observe a near-perfect spectral overlap between Llama-3.1 and its post-trained Tulu-3 variant. Simultaneously, the separation from the Llama-2 baseline is clear. This distinction supports that the spectral signature is primarily determined during pre-training and remains robust to post-training adjustments. We provide comprehensive experimental results in Appendix~\ref{app:robust_esd} to further corroborate these findings.
+
+\begin{figure}[tbh]
+    \centering
+    \includegraphics[width=0.95\linewidth]{figs/signature/esd_layer10_comparison_3models.pdf}
+    \caption{Eigenspectrum shape serves as a distinct signature for model lineage. We visualize the weight ESDs of three LLMs. Models sharing the same backbone (Llama-3.1 and its post-trained variant Tulu-3) exhibit nearly identical spectral shapes and power-law exponents ($\ALPHAHILL \approx 2.85$), while a model from a different family (Llama-2) shows significant deviation. This structural persistence validates the use of ESD shape as a robust spectral signature.}
+    \label{fig:esd_layer10_llama}
+\end{figure}
+
+

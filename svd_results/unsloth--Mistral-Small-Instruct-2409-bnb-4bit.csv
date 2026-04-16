@@ -1,0 +1,2 @@
+model_id,is_adapter,D,M,N,alpha,alpha_weighted,entropy,log_alpha_norm,log_norm,log_spectral_norm,longname,projection,layer,matrix_rank,norm,num_evals,spectral_norm,stable_rank,xmax,xmin,params
+unsloth/Mistral-Small-Instruct-2409-bnb-4bit,False,0.0167394280433654,32768,6144,3.9974477291107178,8.606026067328953,1.261385440826416,8.606029510498047,3.31192181976977,2.152880200198008,lm_head,lm_head,,6144,2050.79296875,6144,142.1936492919922,14.42253559818788,142.1936492919922,0.0145104452967643,201326592

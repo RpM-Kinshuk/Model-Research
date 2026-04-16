@@ -1,0 +1,242 @@
+\subsection{Measuring LLM Similarities}\label{sec:result_llm_lineage}
+
+\paragraph{Model Corpus.} 
+We select Llama-2-7b~\cite{touvron2023llama2openfoundation} as the base model and compare it with related variants. These related variants share the same architecture as the base model and include four types:
+(i) fine-tuned models and reinforcement learning models,
+(ii) merged models and pruned models,
+(iii) noise-injected models obtained by adding i.i.d. Gaussian perturbations to all weight entries with noise strength $\gamma \in \{0.05,0.30,1.00\}$, as defined in Appendix (Sec.~\ref{app:noise}),
+(iv) output-invariant transformations on adjacent matrices and output-invariant permutations of hidden units, as defined in Appendix (Sec.~\ref{attack}). This corpus isolates a key practical goal: a lineage/similarity signal should remain stable for true descendants under post-training and output-invariant reparameterizations, while being informative under destructive edits (e.g., aggressive pruning).
+
+\paragraph{Setup.}
+We compare against both \emph{data-aware} and \emph{data-free} baselines. For data-aware methods, we use \textsc{REEF}~\cite{zhang2025reef}, which computes similarity from activation features on a fixed prompt set (300 prompts for TruthfulQA~\cite{lin2022truthfulqa}), and \textsc{Logits}~\cite{Yang2024AFF}, which measures similarity from model outputs on the same prompts. For data-free approaches, we apply \textsc{PCS}~\cite{zeng2024HuRef} that computes cosine similarity between flattened weight tensors under a fixed alignment, and discuss alignment-based weight signature (e.g., \textsc{AWM}~\cite{zeng2025awm}) as a complementary point of comparison: these methods operate at the matrix level and often require per-pair matching/alignment, which makes them less convenient as a drop-in kernel when building dense similarity matrices for zoo-scale clustering and retrieval.
+
+\paragraph{Results.}
+Tab.~\ref{tab:similarity_score} summarizes the overall similarity performance of our method compared to baseline models. It demonstrates the robustness of our \ALPHAHILL under diverse scenarios, including fine-tuning, pruning, model merging, noise injection, and output-invariant attacks. First, the similarity scores of our method remain consistently high for Llama-2-7b related variants, such as multiple fine-tuned models, with scores in the $[0.97,1.0]$ range across instruction tuning and domain shifts. In contrast, data-aware baselines can fail under prompt- or language-induced behavior changes. For example, Logits drops sharply for the Chinese variants, and REEF degrades for the LoRA-unloaded model, whereas our scores remain stable. Under weight noise injection, our similarity decreases mildly as $\sigma$ increases from $\approx 0.999$ at $\gamma=0.05$ to $\approx 0.979$ at $\gamma=1.00$, outperforming PCS and REEF at the strongest noise perturbation. 
+%
+Moreover, our method is robust to hidden-unit permutations and random scaling under output-invariant transformations, while PCS is sensitive to both.
+%
+For unstructured pruning, our similarity decreases gradually at 30–50\% sparsity and drops substantially at 70\% sparsity, indicating degradation under aggressive parameter removal rather than a saturated score. 
+%
+In a large model zoo, downstream tasks (routing, clustering, and retrieval) require a stable all-pairs kernel. Data-aware methods require prompts and incur inference cost per comparison; matrix-level signatures (e.g., \textsc{AWM}) require heavier per-pair computation and are less convenient when constructing dense similarity matrices. 
+%
+Our approach computes a compact signature once per model and yields a cheap, alignment-free similarity that remains robust under the very transformations that break coordinate-dependent weight distances, making it practical for large-scale lineage analysis.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\linewidth]{figs/ClassifierAndCluster/barchart.pdf}
+    \caption{Accuracy of routing derived models to their base model using the 8-way classifier. Results are reported across model families and similarity kernels. Each bar denotes the classification accuracy for a given family under the specified kernel.}
+    \label{fig:barchart}
+\end{figure}
+
+
+\begin{table*}[t]
+\centering
+\caption{A comprehensive evaluation of signature-based methods for measuring LLM similarity across diverse settings. Here, \legendbox{simHigh}, \legendbox{simMid}, and \legendbox{simLow} denote similarity scores $>0.8$ (high), between $0.5$ and $0.8$ (moderate), and $<0.5$ (low), respectively.}
+\label{tab:similarity_score}
+
+\renewcommand{\arraystretch}{1.15}
+\setlength{\tabcolsep}{5pt} % slightly tighter
+\resizebox{0.98\textwidth}{!}{%
+\begin{tabular}{l*{6}{>{\centering\arraybackslash}m{2.45cm}}}
+\toprule\toprule
+\rowcolor{black!10}
+ & \multicolumn{6}{c}{\textbf{Model Fine-tuning}} \\
+ & \makecell{\textbf{llama2-7b-hf-}\\\textbf{instruction-lora}}
+ & \makecell{\textbf{vicuna-}\\\textbf{-v1.5}}
+ & \makecell{\textbf{Nous-Hermes-}\\\textbf{llama-2-7b}}
+ & \makecell{\textbf{chinese-llama}\\\textbf{-2-7b}}
+ & \makecell{\textbf{Llama-2-7b-hf}\\\textbf{-instruct-pl}\\\textbf{-lora\_unload}}
+ & \makecell{\textbf{chinese-alpaca}\\\textbf{-2-7b}} \\
+\midrule
+\textbf{PCS}~\cite{zeng2024HuRef}    & \simcell{0.9934} & \simcell{0.9986} & \simcell{0.9998} & \simcell{0.9390} & \simcell{0.9992} & \simcell{0.9521} \\
+\textbf{Logits}~\cite{Yang2024AFF}     & \simcell{0.9885} & \simcell{0.7966} & \simcell{0.9920} & \simcell{0.0318} & \simcell{0.9953} & \simcell{0.5631} \\
+\textbf{REEF}~\cite{zhang2025reef} & \simcell{0.7704} & \simcell{0.9989} & \simcell{0.9991} & \simcell{0.9974} & \simcell{0.1463} & \simcell{0.9962} \\
+\textbf{Ours}  & \simcell{0.9989} & \simcell{0.9994} & \simcell{0.9995} & \simcell{0.9728} & \simcell{0.9994} & \simcell{0.9780} \\
+% \midrule\midrule
+% \rowcolor{black!10}
+%  & \multicolumn{6}{c}{\textbf{Unrelated Models}} \\
+%  & \makecell{\textbf{llama-7b}}
+%  & \makecell{\textbf{llama-3.1-8B}}
+%  & \makecell{\textbf{Mistral-7B}}
+%  & \makecell{\textbf{Qwen-1.5-7B}}
+%  & \makecell{\textbf{open-llama-7b}}
+%  & \makecell{\textbf{open-llama-7b}\\\textbf{-v2}} \\
+% \midrule
+% \textbf{PCS}  & \simcell{0.0151} & \simcell{0.1458} & \simcell{0.2749} & \simcell{0.0647} & \simcell{0.0185} & \simcell{0.0149} \\
+% \textbf{Logits}  & \simcell{0.9900} & - & \simcell{0.7760} & \simcell{0.0004} & \simcell{0.9606} & \simcell{0.9547} \\
+% \textbf{REEF} & \simcell{0.1597} & \simcell{0.1517} & \simcell{0.1335} & \simcell{0.1496} & \simcell{0.1745} & \simcell{0.1865} \\
+% \textbf{Ours}  & \simcell{0.9275} & \simcell{0.6621} & \simcell{0.7744} & \simcell{0.6882} & \simcell{0.7238} & \simcell{0.6053} \\
+\midrule\midrule
+\rowcolor{black!10}
+ & \multicolumn{3}{c}{\textbf{Unstructured Pruning}} & \multicolumn{3}{c}{\textbf{RL Models}} \\
+ & \makecell{\textbf{30\%}}
+ & \makecell{\textbf{50\%}}
+ & \makecell{\textbf{70\%}}
+ & \makecell{\textbf{Archer-Code-}\\\textbf{1.5B (GRPO)}}
+ & \makecell{\textbf{
+Nemotron-Resear-}\\\textbf{ch-Reasoning}\\\textbf{-Qwen-1.5B}\\\textbf{(Reinforcement++)}}
+ & \makecell{\textbf{
+Polaris-7B-}\\\textbf{Preview}\\\textbf{(DAPO)}} \\
+\midrule
+\textbf{PCS}~\cite{zeng2024HuRef}  & \simcell{0.9907} & \simcell{0.9051} & \simcell{0.7807} & \simcell{0.9920} & \simcell{0.9920} & \simcell{1.000} \\
+\textbf{Logits}~\cite{Yang2024AFF} & \simcell{1.000} & \simcell{1.000} & \simcell{0.9950} & \simcell{1.000} & \simcell{1.000} & \simcell{1.000} \\
+\textbf{REEF}~\cite{zhang2025reef} & \simcell{0.9983} & \simcell{0.9846} & \simcell{0.9818} & \simcell{0.9866} & \simcell{0.9699} & \simcell{0.9490} \\
+\textbf{Ours} & \simcell{0.8989} & \simcell{0.8903} & \simcell{0.4033 } & \simcell{0.9997} & \simcell{0.9998} & \simcell{0.9997} \\
+\midrule\midrule
+\rowcolor{black!10}
+ & \multicolumn{3}{c}{\textbf{Noise Injection}} & \multicolumn{3}{c}{\textbf{Weight Merging (Evollm-jp)}} \\
+ & \makecell{\textbf{$\gamma=0.05$}}
+ & \makecell{\textbf{$\gamma=0.30$}}
+ & \makecell{\textbf{$\gamma=1.00$}}
+ & \makecell{\textbf{shisa-gamma-7b}}
+ & \makecell{\textbf{wizardmath-7b-1.1}}
+ & \makecell{\textbf{abel-7b-002}} \\
+\midrule
+\textbf{PCS}~\cite{zeng2024HuRef} & \simcell{0.9988} & \simcell{0.9584} & \simcell{0.7097} & \simcell{0.9993} & \simcell{0.9988} & \simcell{0.9989} \\
+\textbf{Logits}~\cite{Yang2024AFF} & \simcell{1.000} & \simcell{1.000} & \simcell{0.9700} & \simcell{0.0000} & \simcell{1.000} & \simcell{1.000} \\
+\textbf{REEF}~\cite{zhang2025reef} & \simcell{0.9990} & \simcell{0.9949} & \simcell{0.6932} & \simcell{0.9333} & \simcell{0.9146} & \simcell{0.8956} \\
+\textbf{Ours} & \simcell{0.9986} & \simcell{0.9868} & \simcell{0.9786} & \simcell{0.9947} & \simcell{0.9353} & \simcell{0.9318} \\
+\midrule\midrule
+\rowcolor{black!10}
+ & \multicolumn{3}{c}{\textbf{Permutation}}
+ & \multicolumn{3}{c}{\textbf{Random Scaling}} \\
+ & \makecell{\textbf{Llama-2-7b}} & \makecell{\textbf{Mistral-7b}} & \makecell{\textbf{Qwen-1.5-7b}}
+ & \makecell{\textbf{Llama-2-7b}} & \makecell{\textbf{Mistral-7b}} & \makecell{\textbf{Qwen-1.5-7b}} \\
+\midrule
+\textbf{PCS}~\cite{zeng2024HuRef} & \simcell{0.0016} & \simcell{0.0021} & \simcell{0.0014} & \simcell{0.6575} & \simcell{0.6554} & \simcell{0.6612}\\ 
+\textbf{Logits}~\cite{Yang2024AFF} & \simcell{1.000} & \simcell{1.000} & \simcell{1.000} & \simcell{0.9600} & \simcell{1.000} & \simcell{0.9600} \\ 
+\textbf{REEF}~\cite{zhang2025reef} & \simcell{1.000} & \simcell{1.000} & \simcell{1.000} & \simcell{1.000} & \simcell{1.000} & \simcell{1.000} \\
+\textbf{Ours} & \simcell{1.000} & \simcell{1.000} & \simcell{1.000} & \simcell{1.000} & \simcell{1.000} & \simcell{1.000} \\
+\bottomrule\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+
+\subsection{Model Classification and Clustering}
+\paragraph{Model Corpus.}
+We construct a corpus of 128 publicly available 7B-8B models derived from 8 distinct architectures. The base checkpoints are llama-7b~\cite{touvron2023llamaopenefficientfoundation}, llama-2-7b~\cite{touvron2023llama2openfoundation}, llama-3.1-8b~\cite{grattafiori2024llama3herdmodels}, mistral-7b-v0.1, mistral-7b-v0.2~\cite{jiang2023mistral7b}, open-llama-7b, open-llama-7b-v2~\cite{openlm2023openllama}, and qwen-1.5-7b~\cite{bai2023qwentechnicalreport}. 
+Each derived model is assigned a lineage label based on its publicly reported training origin (e.g., the stated base checkpoint in the repository documentation). For the classification task, we classify each of the 128 derived models into one of the 8 base families by selecting the base with the highest spectral signature similarity to the model. For the clustering task, we perform unsupervised clustering on the signatures of all 128 derived models and 8 base checkpoints.
+
+
+\paragraph{Setup.}
+For the classification task, we evaluate robustness to the similarity definition by applying three kernels on spectral signatures: Spearman rank correlation, radial basis function (RBF) kernel, and cosine similarity (detailed in Appendix Sec.~\ref{app:classification_metric}). This allows us to assess the stability of family attribution results under different similarity measures.
+For the clustering task, we conduct two complementary studies. First, we assess how different ESD-derived metrics cluster 136 models by comparing shape metrics (\ALPHAHILL), scale metrics (Log\_Norm and Spectral\_Norm), and a combined shape–scale metric (Log\_Alpha\_Norm). Second, we evaluate the robustness of clustering by applying the four clustering methods, as described in Sec.~\ref{sec:method}, to these representations. We assess clustering quality using the Silhouette Coefficient~\cite{rousseeuw1987silhouettes} and the Davies–Bouldin Index~\cite{davies2009cluster}, as detailed in Appendix (Sec.~\ref{app:eval_metrics_clustering}).
+
+
+
+\paragraph{Classification Results.}
+% To evaluate the robustness of our family attribution results to the choice of similarity measure, we instantiate three kernels on spectral fingerprints.
+% Given two signatures $\mathbf{Z}_1,\mathbf{Z}_2$, we consider:
+% (i) Spearman rank correlation $\rho_s(\mathbf{Z}_1,\mathbf{Z}_2)$ as our default similarity (Eq.~\ref{eq:sr}),
+% (ii) an RBF kernel applied to the signature distance (Eq.~\ref{eq:rbf}), 
+% \begin{equation}
+% k_{\text{RBF}}(\mathbf{Z}_1,\mathbf{Z}_2)=\exp\!\left(-\frac{\|\mathbf{Z}_1-\mathbf{Z}_2\|_2^2}{2\sigma^2}\right)
+% \label{eq:rbf}
+% \end{equation}
+% , and
+% (iii) cosine similarity (Eq.~\ref{eq:cos}).
+% \begin{equation}
+% k_{\cos}\mathbf({Z}_1,\mathbf{Z}_2)=\frac{\langle \mathbf{Z}_1,\mathbf{Z}_2\rangle}{\|\mathbf{Z}_1\|_2\|\mathbf{Z}_2\|_2}
+% \label{eq:cos}
+% \end{equation}
+Fig.~\ref{fig:barchart} shows that the proposed spectral signature enables accurate lineage attribution across all eight model families with an overall accuracy of 98.44\%. Across similarity kernels, the classifier consistently achieves near-perfect accuracy, indicating that lineage information is strongly preserved in the spectral representation. Performance is stable across Spearman rank, RBF, and cosine similarity, suggesting that the results are not sensitive to the choice of similarity measure. 
+%
+Minor accuracy variations are mainly observed for closely related families, such as mistral-7b-v0.1 and mistral-7b-v0.2, which correspond to different versions within the same model line and share highly similar architectures and training procedures.
+%
+Overall, these results demonstrate that spectral signatures provide a reliable and discriminative basis for large-scale model routing and lineage classification.
+
+
+\begin{table}[h]
+\centering
+\caption{Comparing the clustering performance of spectral clustering using spectral signatures constructed by different metrics.}
+\label{tab:clustering_quality_esd}
+\resizebox{\columnwidth}{!}{
+    \begin{tabular}{lcc}
+    \toprule
+    \textbf{Metric} & \textbf{Silhouette (↑)} & \textbf{Davies\_Bouldin (↓)}\\
+    \midrule
+    Log\_Norm (scale)& 0.70 & 0.47\\
+    Spectral\_Norm (scale) & 0.81 & 0.35\\
+    Log\_Alpha\_Norm (scale) & 0.88 & 0.23\\
+    \rowcolor{black!10} \ALPHAHILL (shape) & \textbf{0.91} & \textbf{0.22}\\
+    % alpha\_weighted     & 6 & 0.8129 & 0.3322 & 0.4976 \\
+    % norm                & 5 & 0.6970 & 0.4664 & 0.0610 \\
+    % entropy             & 6 & 0.8083 & 0.3851 & 0.1980 \\
+    % Log\_Norm           & 5 & 0.6970 & 0.4664 & 0.0610 \\
+    % Spectral\_Norm      & 6 & 0.8111 & 0.3537 & 0.4207 \\
+    % Log\_Alpha\_Norm     & 6 & 0.8800 & 0.2302 & 0.2870 \\
+    % \ALPHAHILL               & 6 & 0.9129 & 0.2168 & 0.1085 \\
+    % log\_spectral\_norm  & 6 & 0.8111 & 0.3537 & 0.4207 \\
+    % stable\_rank        & 6 & 0.7801 & 0.4263 & 0.3771 \\  
+    % matrix\_rank        & 4 & 0.2743 & 1.3623 & 0.4467 \\
+    \bottomrule
+    \end{tabular}%
+}
+\end{table}
+
+
+% \paragraph{Clustering Results.}
+
+% \ishan{The following paragraphs describe the new substitute evaluation metrics for tables 4, 5, and 6. These tables will be put in the Appendix when readers want greater detail on cluster label assignment. Using this approach, Alpha metric has accuracy of 88.2\% (0.882); Log Alpha Norm is 84.6\% (0.846); Log Norm is 79.4\% (0.794)}
+
+% \begin{table}[h]
+% \centering
+% \caption{Clustering Accuracy (ACC) across different spectral metrics.}
+% \label{tab:clustering_results}
+% \begin{tabular}{lc}
+% \toprule
+% \textbf{Configuration} & \textbf{Accuracy} \\
+% \midrule
+% Alpha & \textbf{0.882} \\
+% Log Alpha Norm & 0.846 \\
+% Log Norm & 0.794 \\
+% \bottomrule
+% \end{tabular}
+% \end{table}
+
+\paragraph{Model Clustering Results. }
+
+
+% We quantitatively assess the ability of the proposed spectral signatures to discover the underlying genealogical structures using \textit{clustering accuracy} (ACC). We formulated a maximum weight matching problem in a bipartite graph, where $N$ is the total number of models, $y_i$ is the ground truth label (source model), and $c_i$ is the cluster assignment for the $i$-th model. We define the accuracy as:
+
+
+% \begin{equation}
+%     \text{ACC} = \max_{\pi \in \Pi} \frac{1}{N} \sum_{i=1}^{N} \mathbf{1}\{y_i = \pi(c_i)\}
+% \end{equation}
+
+% where $\Pi$ is the set of all possible permutations mapping the cluster indices to the ground truth labels, and $\mathbf{1}\{\cdot\}$ is the indicator function. We solve this problem using the Hungarian algorithm (Kuhn-Munkres) on the contingency table (confusion matrix) of the two label sets. This metric penalizes both over-merging distinct source models into a single cluster and over-splitting a single source model across multiple clusters.
+
+
+Tab.~\ref{tab:clustering_quality_esd} compares the clustering result using spectral signature constructed by different metrics. We can see that the proposed \ALPHAHILL achieves 0.91 silhouette score and 0.22 Davies–Bouldin index, consistently outperforming other scale-based metrics. 
+
+% Tab.~\ref{tab:clustering_results}, with more detailed information in Tab. ~\ref{tab:alpha_clusters}, Tab. ~\ref{tab:log_alpha_norm_clusters}, and Tab. ~\ref{tab:log_norm_clusters},  demonstrates that the alpha metric was able to cleanly partition dissimilar models, forming 6 distinct clusters: llama-7B, mistral-7B, open-llama-7B, llama-3.1-8B, llama-2-7B, and Qwen models. However, we can see that with log alpha norm, a scale metric, starts mislabeling llama-7B models with some of the other llama and open-llama models. Log norm, another scale metric, struggles even more at separating dissimilar models, grouping various llama and open-llama models into the same cluster, and various llama models ``leaking'' into other llama clusters (for example llama-7B and llama-2-7B). These combined perspectives, both the internal evaluation metrics and checking with ground truth labels, demonstrate very strong performance for shape metrics at distinguishing similar models from dissimilar models, and less strong performance for scale metrics. More importantly, this demonstrates the ability for ESD shape metrics to cluster models in weight space. Each family occupies a distinct region in weight space, affirming our understanding that information about model correlation and provenance is embedded in the shape metrics of model weight spectral distributions.  
+
+% \textbf{Clustering using multiple algorithms}
+\begin{table}[h]
+\centering
+\caption{Comparing different clustering algorithms using the spectral signature constructed by \ALPHAHILL.}
+\label{tab:clustering_comparison_alpha}
+\resizebox{0.9\columnwidth}{!}{%
+    \begin{tabular}{lcc}
+    \toprule
+    \textbf{Method} & \textbf{Silhouette ($\uparrow$)} & \textbf{Davies\_Bouldin ($\downarrow$)}\\
+    \midrule
+    % hdbscan  & 7 & 0.7297 & 0.5601 & 0.0026 \\
+    % bgmm     & 7 & 0.7297 & 0.5601 & 0.0026 \\
+    % spectral & 6 & 0.9129 & 0.2168 & 0.1085 \\
+    % kmeans   & 7 & 0.7297 & 0.5601 & 0.0026 \\
+    HDBSCAN & 0.73 & 0.56 \\
+    BGMM    & 0.73 & 0.56 \\
+    K-Means   & 0.73 & 0.56 \\
+    Spectral Clustering & 0.91 & 0.22 \\
+    \bottomrule
+    \end{tabular}%
+}
+\end{table}
+
+To further evaluate the robustness of our proposed spectral signature, in Tab. \ref{tab:clustering_comparison_alpha} we report the result of different clustering algorithms using the proposed spectral signature. All clustering algorithms using the spectral signature achieve high silhouette scores, with a minimum of 0.73 and a maximum of 0.91. This shows that the proposed spectral signature provides a robust and effective embedding for different classes of clustering algorithms. 
+
+% Fig. ~\ref{fig:sim_bar} displays how spectral clustering grouped models for the alpha metric. Given the high-dimensionality of the weight-space, the differing number of clusters is likely an artifact of how spectral clustering internally reduced dimensionality via a graph laplacian. Tab. ~\ref{tab:alpha_clusters} highlights the membership of the 6 clusters in Fig. ~\ref{fig:sim_bar}, with the possibility of a 7th cluster, where HDBSCAN, Bayesian Gaussian Mixture Model, and K-Means distinguished between open-llama-v1 and open-llama-v2 models (which exhibit slightly more dissimilarity than the two mistral versions). Further analysis of the labels revealed complete agreement between these three algorithms.
+
+As an illustrative example, in Fig.~\ref{fig:sim_bar} we provide the clustering result of 2D t-SNE using the spectral clustering algorithm with spectral signatures constructed by \ALPHAHILL. As we can see, the proposed spectral signature clearly separates different model families, resulting in distinct clusters.

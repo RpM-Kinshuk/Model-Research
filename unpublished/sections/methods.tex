@@ -1,0 +1,153 @@
+\section{Method}\label{sec:method}
+Using robustness properties of \ALPHAHILL established in Sec.~\ref{sec:preliminary}, we present our methodology for applying \ALPHAHILL-based spectral signatures to model quantification. As illustrated in Fig.~\ref{fig:teaser}, for a given collection of LLMs, we extract the \ALPHAHILL statistic from each weight matrix and aggregate these measurements to construct a model-level spectral signature, as formalized in Sec.~\ref{sec:signature_formulation}. We then use these spectral signatures to address three model quantification tasks: (1) measuring similarity between LLMs, (2) model classification and clustering, and (3) predicting downstream LLM performance. The detailed methodology is shown in Sec.~\ref{sec:applying_spectral_signature}.
+
+\begin{figure*}[h!]
+\centering
+\includegraphics[width=0.98\textwidth]{figs/teaser_fig.pdf}
+% \put(-135, 28){$\vdots$}
+% \put(-429, 24){$\vdots$}
+\caption{Overview of our proposed shape-based spectral signature framework. We analyze the eigenspectrum of model weights and use the shape information of ESDs (\ALPHAHILL) as spectral signatures for downstream tasks.}
+\label{fig:teaser}
+\end{figure*}
+
+
+\subsection{Formulation of Spectral Signatures}\label{sec:signature_formulation}
+For a model $f_{\theta}$ in parameter space $\Theta$ with $L$ transformer blocks and $N_{\text{mod}}$ modules, we quantify the model by constructing a spectral signature
+\begin{equation}
+    \mathbf{Z}\in\mathbb{R}^{N_{\text{mod}}\times L}
+\end{equation}
+which is a tensor consisting of the \ALPHAHILL measure of each module, and each row $\mathbf{Z}_{i, :}\in\mathbb{R}^{L}$ is a vector of \ALPHAHILL of modules of the same type. For standard transformer architecture, we have $N_{\text{mod}} = 7$.  
+
+The tensor representation of spectral signature creates a mapping $\Theta \to \mathbb{R}^{N_{\text{mod}}\times L}$ that extracts the spectral information of each weight matrix in the model. Furthermore, it allows module-level analysis, as different types of transformer layers often undergo different degrees of structural changes during post-training. Our empirical observation shows that Multi-Layer Perceptron (MLP) projection layers typically show larger separation in independently trained models compared to attention layers (see Appendix \ref{sec:similarity_within_modules}).
+
+
+
+
+% To quantify a model $f_{\theta}$ in parameter space $\Theta$, we construct a spectral signature: $\mathbf{Z}\in\mathbb{R}^{N_{mod}\times L}$.
+% % \[
+% % \mathcal{T}\in\mathbb{R}^{m\times L}
+% % \]
+% $\mathbf{Z}$ is obtained by extracting a spectral feature from each weight matrix across $L$ attention blocks and $N_{mod}$ modules. For a typical Transformer architecture~\citep{vaswani2017attention}, we consider $N_{mod}=7$ modules per layer: the attention projections ($W_Q, W_K, W_V, W_{O}$) and the FFN projections ($W_{\text{up}}, W_{\text{down}}, W_{\text{gate}}$), though $N_{mod}$ may vary depending on the specific model architecture.
+
+% By extracting spectral information (specifically the shape property of the eigenspectrum) of each weight matrix, we map the model $f_{\theta}$ into a structured tensor space. In our analysis, we primarily employ \ALPHAHILL as the cornerstone metric of the spectral signature, which has been proven to be robust and predictive.
+\subsection{Applying Spectral Signature to Model Quantification}\label{sec:applying_spectral_signature}
+The spectral signature encodes robust spectral information of each weight matrix in an LLM, which can be used for systematic management and quantification of large collections of LLMs. In this section, we describe how spectral signatures can be systematically applied to model quantification tasks, and we demonstrate their use in the following representative scenarios:
+
+\noindent\paragraph{Measuring LLM Similarities}\label{sec:method_llm_sim}
+
+
+% \paragraph{Fingerprint similarity.}
+% Given fingerprints $\mathbf{Z}_1$ and $\mathbf{Z}_2$ (Sec.~4.1), we consider the layer-wise fingerprints for module $i$.
+% \begin{equation}
+% \mathrm{Sim}(\mathbf{Z}_{1,i},\mathbf{Z}_{2,i})
+% ~=~\rho_s(\mathbf{Z}_{1,i},\mathbf{Z}_{2,i})
+% ~=~\mathrm{corr}\!\left(\mathrm{rank}(\mathbf{Z}_{1,i}),~\mathrm{rank}(\mathbf{Z}_{2,i})\right),
+% \label{eq:sr}
+% \end{equation}
+% where $\rho_s$ is Spearman's rank correlation (ties handled by average ranks) of \ALPHAHILL. We denote the similarity with \ALPHAHILL-SR.
+
+
+
+
+To quantify the relations between models in a model collection $\mathcal{F}$, we define a similarity measure based on their spectral signatures. 
+% Empirically, different modules exhibit different discriminative power: for independently trained models, MLP projection modules typically show larger separation in Spearman correlation than attention $Q/K$ modules (Appendix~).
+
+Let $\mathbf{Z}^{(k)} \in \mathbb{R}^{N_{\text{mod}} \times L}$ denote the spectral signature of model $k$, where the $i$-th row $\mathbf{Z}^{(k)}_{i, :}\in\mathbb{R}^{L}$ corresponds to the vector of \ALPHAHILL of all occurrences of the $i$-th module type (e.g., Attention Q/K/V, MLP).
+Given two models $f_{\theta_1}, f_{\theta_2}$ with signatures $\mathbf{Z}^{(1)}, \mathbf{Z}^{(2)}$, we compute the pairwise similarity by averaging the Spearman rank correlations across aligned modules:
+% Thus, for any two models $f_{\theta_1}, f_{\theta_2} \in \mathcal{F}$ with signatures $\mathbf{Z}_1, \mathbf{Z}_2$, the pairwise similarity is computed by averaging the similarities across modules:
+
+
+\begin{equation}
+\mathrm{Sim}(\mathbf{Z}^{(1)}, \mathbf{Z}^{(2)}) = \frac{1}{N_{\text{mod}}} \sum_{i=1}^{N_{\text{mod}}} \rho_s(\mathbf{Z}^{(1)}_{i, :}, \mathbf{Z}^{(2)}_{i, :})
+\label{eq:similarity}
+\end{equation}
+where $\rho_s(\cdot, \cdot)$ is the Spearman's rank correlation coefficient:
+\begin{equation}
+\rho_s(\mathbf{u}, \mathbf{v}) = \mathrm{corr}\!\left(\mathrm{rank}(\mathbf{u}),~\mathrm{rank}(\mathbf{v})\right).
+\label{eq:sr}
+\end{equation}
+
+% where $\mathbf{Z}_{k,i} \in \mathbb{R}^L$ denotes the row vector corresponding to the $i$-th module of model $k$. The function $\mathrm{Sim}(\cdot,\cdot)$ represents the Spearman rank correlation between two spectral vectors: 
+% \begin{equation}
+% \mathrm{Sim}(\mathbf{Z}_{1,i},\mathbf{Z}_{2,i})
+% ~=~\rho_s(\mathbf{Z}_{1,i},\mathbf{Z}_{2,i})
+% ~=~\mathrm{corr}\!\left(\mathrm{rank}(\mathbf{Z}_{1,i}),~\mathrm{rank}(\mathbf{Z}_{2,i})\right),
+% \label{eq:sr}
+% \end{equation}
+
+% Instead of flattening the entire signature into a single vector, we compute correlation in a module-wise manner. Averaging these module-specific correlations ensures that the similarity metric captures structural correspondences across all functional components of the Transformer.
+ 
+We use Spearman correlation in Eq.~\ref{eq:similarity}--\ref{eq:sr} because it depends only on the \emph{relative} depth-wise ordering of \ALPHAHILL values, making the similarity less sensitive to module-specific affine distortions of the statistics and improving comparability across scales.
+More importantly, \ALPHAHILL itself provides exact invariances that directly match our output-invariant stress tests.
+For any weight matrix $\mathbf{W}$, let $\mathbf{C}=\mathbf{W}^{\top}\mathbf{W}$ with eigenvalues $\{\lambda_j\}$.
+If $\mathbf{W}' = c\,\mathbf{P}\mathbf{W}\mathbf{Q}$ where $c>0$ and $\mathbf{P},\mathbf{Q}$ are orthogonal (including permutations), then ${\mathbf{W}'}^{\!\top}\mathbf{W}' = c^2\,\mathbf{Q}^{\top}\mathbf{C}\mathbf{Q}$ has eigenvalues $\lambda'_j=c^2\lambda_j$.
+Since the Hill estimator used for \ALPHAHILL depends on log-ratios of tail eigenvalues, these ratios are unchanged and thus $\ALPHAHILL(\mathbf{W}')=\ALPHAHILL(\mathbf{W})$.
+This yields permutation- and scale-robust similarity \emph{without} solving explicit neuron-matching problems that arise in matrix-level fingerprints such as \textsc{AWM}~\cite{zeng2025awm}.
+
+
+
+
+% {\color{red}The choice of this similarity metric is motivated by its consistency across different training stages. Our preliminary analysis suggests that the spectral characteristics, particularly the intra-module metric ranks captured by \ALPHAHILL, remain stable even under extensive weight updates such as full fine-tuning, as illustrated in Sec. 3.2. This stability ensures that the derived signature $\mathbf{Z}$ reflects the intrinsic structural properties of the model rather than transient noise from specific training iterations.} \puren{this connects with sec 3.2. Do we need to specify that it applies to full fine-tuning? For RLFT, we have not explored yet. LLM similarity is useful for both classifications and clustering.}
+
+
+
+\paragraph{Model Classification}
+The properties of the spectral signature further enable its use for identifying the lineage of an LLM among candidate base models, as models derived from the same base model exhibit highly similar eigenspectrum shapes, whereas models with different origins show substantial divergence in shape. We approach the lineage identification as an unsupervised classification problem in the spectral signature space, and we use a nearest-neighbor classifier based on the spectral similarity from Eq.~\ref{eq:similarity}.
+
+Let $\{\mathbf{Z}^{(k)}\}_{k=1}^{K}$ denote the set of spectral signatures for $K$ known base foundation models. For a given query model with spectral signature $Z$, we compute its similarity to each base model via the spectral signature similarity formula defined in Eq.~\ref{eq:similarity}. The predicted lineage $\hat{k}$ is the base model that maximizes this similarity:
+
+\begin{equation}
+\hat{k} = \operatorname*{arg\,max}_{k \in \{1, \dots, K\}} \operatorname{Sim}(\mathbf{Z}, \mathbf{Z}^{(k)})
+\end{equation}
+
+% This method assumes that the spectral signature $Z$ serves as a robust signature, where the intra-lineage similarity (between a derivative and its base) significantly exceeds inter-lineage similarity.
+
+
+\noindent\paragraph{Model Clustering. }
+Spectral signature of LLMs further enables the discovery of underlying genealogical structures within large model collections without supervision. We formulate this problem as a clustering problem in the space of spectral signatures. 
+
+Given a model collection $\mathcal{F} = \{f_{\theta_1}, \dots, f_{\theta_N}\}$, we extract the spectral signature $\mathbf{Z}^{(k)} \in \mathbb{R}^{N_{\text{mod}} \times L}$ of each model $f_{\theta_k}$. For vector-based clustering algorithms, we flatten $\mathbf{Z}^{(k)}$ into a feature vector $\mathbf{z}^{(k)} \in \mathbb{R}^{N_{\text{mod}} \cdot L}$. We employ four distinct clustering pipelines: HDBSCAN, Bayesian Gaussian Mixture Models (BGMM), Spectral Clustering, and K-Means.  
+
+For model clustering, we apply spectral signature to four unsupervised pipelines: HDBSCAN, Bayesian Gaussian Mixture (BGMM), Spectral Clustering, and K-Means, assuming minimal prior knowledge of the data distribution or the number of clusters.  
+
+Due to the high dimensionality of the spectral signature representations, we apply Uniform Manifold Approximation and Projection (UMAP) as a preprocessing step for HDBSCAN, BGMM, and K-Means. In contrast, Spectral Clustering operates directly on the original high-dimensional pairwise distance matrix, where dimensionality reduction is implicitly handled through the graph Laplacian eigenstructure. Hyperparameters for clustering algorithms (i.e. number of clusters), are selected by maximizing the silhouette score. To ensure that clustering quality reflects intrinsic structure in the weight space rather than artifacts introduced by the embedding process, all internal evaluation metrics (e.g., silhouette scores) are computed using distances in the original spectral signature space. We assess the robustness and generalizability of each clustering pipeline by repeating experiments under random subsampling at varying sample sizes, verifying consistent clustering behavior across regimes.
+
+% Given the high dimensionality of the spectral signatures, we apply Uniform Manifold Approximation and Projection (UMAP) for dimensionality reduction prior to applying HDBSCAN, BGMM, and K-Means. For Spectral Clustering, we operate directly on the original high-dimensional distance matrix, leveraging the graph Laplacian for internal dimensionality reduction.
+
+% We select the optimal model hyperparameters by maximizing the silhouette score. Crucially, to verify that the clusters represent intrinsic properties of the weight matrices rather than artifacts of the embedding process, we compute all internal evaluation metrics (such as silhouette scores) in the original weight space rather than the reduced UMAP space.
+
+
+
+
+
+
+
+
+\noindent\paragraph{Predicting LLM Performance}\label{sec:method_pred_performance}
+
+
+To quantify the predictive power of the proposed spectral signature, we treat the performance estimation as a non-parametric regression task over the model manifold. Given a query model $f_{\theta}$ with spectral signature $\mathbf{Z}$ and a reference pool of models $\mathcal{P} = \{(\mathbf{Z}^{(i)}, \mathbf{b}_i)\}_{i=1}^N$, where $\mathbf{b}_i$ is the spectral signature and $\mathbf{b}_i$ is the vector of benchmark scores, we estimate the performance of $f_{\theta}$ using distance-weighted $k$-nearest neighbor ($k$-NN) Interpolation.
+Specifically, we first derive a distance metric $d(\mathbf{Z}, \mathbf{Z}^{(i)})$ from the spectral similarity $\mathrm{Sim}(\mathbf{Z}, \mathbf{Z}^{(i)})$. 
+%
+We employ the transformation $d(\mathbf{Z}, \mathbf{Z}^{(i)})= 1 - \mathrm{Sim}(\mathbf{Z}, \mathbf{Z}^{(i)})$. This ensures that models with highly correlated spectral shapes are positioned closer in the embedding space.
+
+The predicted benchmark scores $\tilde{\mathbf{b}}$ are computed by aggregating the top-$k$ most similar neighbors in $\mathcal{P}$:
+%
+$$\tilde{\mathbf{b}} = \frac{\sum_{i \in \mathcal{K}} w_i \cdot \mathbf{b}_i}{\sum_{i \in \mathcal{K}} w_i},$$
+%
+where $\mathcal{K}$ is the set of $k$ nearest neighbors, and $w_i = 1 / (d(\mathbf{Z}, \mathbf{Z}^{(i)}) + \epsilon)$ is the assigned weight. This interpolation relies on the assumption that models that exhibit similar heavy-tailed self-regularization patterns in their weight matrices are likely to possess comparable generalization capabilities.
+
+We then quantify the prediction accuracy with:
+\begin{equation}
+D_{perf}=\|\tilde{\mathbf{b}}-\mathbf{b}\|
+\label{eq:Perfdist}
+\end{equation}
+where $\mathbf{b}$ represents the ground truth benchmark scores. Typically, $\|\cdot\|$ in Eq.~\ref{eq:Perfdist} is defined by mean absolute error (MAE).
+
+% We do a two-stage check: 1. check the low-rank strategy due to the low-rank methods changing the weight matrices a lot; 2. check the alpha metric due to the robustness of the alpha metric. We will have a test on the alpha metric with random noise on weight matrices to mimic the post-tuning process. We will see that the noise does not change the alpha metric. We will see a pretty similar ESD performance due to the robustness of alpha. 
+
+
+
+
+
+

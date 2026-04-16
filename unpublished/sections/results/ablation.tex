@@ -1,0 +1,82 @@
+\subsection{Ablation Study}\label{sec:ablation}
+
+\textbf{\ALPHAHILL remains robust under output-invariant reparameterizations.}
+We evaluate whether \ALPHAHILL is a robust metric for constructing a spectral signature by performing output-invariant reparameterizations on weight matrices before measuring model similarity with Eq.~\ref{eq:similarity}. We compare the spectral signature constructed by \ALPHAHILL with other ESD scale metrics (Log Norm and Spectral Norm). Concretely, we apply two reparameterizations on LLaMA-2-7B model: (i) using output-invariant scaling to consecutive attention modules (Q/K and V/O pairs), and (ii) output-invariant change of basis between two consecutive linear layers in the feed-forward network (FFN) module (more details can be found in Appendix~\ref{attack}).
+%
+Then, we compare our spectral similarity against PCS and other ESD-based scale metrics. Across scaling strengths, PCS degrades substantially, while \ALPHAHILL similarity remains essentially unchanged and stays near 1, correctly recognizing the transformed weights as functionally identical (Fig.~\ref{fig:qk}). Furthermore, under MLP hidden-unit permutations, PCS collapses to near zero, but \ALPHAHILL remains near-perfect (Tab.~\ref{tab:MLP}).
+
+\emph{Why this ablation matters.} Data-aware similarity (e.g., Logits and REEF) is expected to remain high under strictly output-invariant transforms, but it requires a prompt distribution and $O(\#\text{prompts})$ inference per comparison, making it unsuitable as a zoo-scale kernel. Weight-matrix fingerprints such as \textsc{AWM}~\cite{zeng2025awm} reduce some reparameterization sensitivity but still require matrix-level comparisons (and often assignment/matching) per pair. In contrast, our ESD \emph{shape} signature is computed once per model and yields invariance to common output-preserving symmetries without explicit matching. Note that pure scale metrics (Log Norm, Spectral Norm) are also invariant here, but precisely because they track magnitude, they tend to saturate and are less discriminative across independently trained families (see Sec.~\ref{sec:result_llm_lineage}).
+
+\textbf{\ALPHAHILL remains robust under random perturbations.}
+To simulate post-training weight changes, we inject Gaussian noise of increasing magnitude into model weight entries and evaluate the stability of different similarity metrics. We follow the noise strength ($\gamma$) definition in Appendix~\ref{app:noise} and report full results in Tab.~\ref{tab:ablation_noise}. 
+%
+Across all noise levels, our \ALPHAHILL–based similarity remains close to the unperturbed model, but PCS degrades substantially as noise magnitude increases. These results indicate that spectral shape features provide a robust measure of model similarity under realistic weight-space perturbations. Moreover, spectral scale metrics also perform well in this scenario since additive Gaussian noise perturbs weights without strongly changing their overall magnitude. Beyond global averages, we analyze the layer-wise response to perturbation. As shown in Fig.~\ref{fig:noise_evol}, we observe that as noise intensity increases, \ALPHAHILL monotonically increases across all layers.
+
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.9\linewidth]{figs/Ablation_Reparam/QK.pdf}
+    \caption{Robustness of different similarity metrics under output-invariant random scaling. \ALPHAHILL is a shape metric, while Log Norm and Spectral Norm are scale metrics.}
+    \label{fig:qk}
+\end{figure}
+
+\begin{table}[h]
+\centering
+\caption{Robustness of different similarity metrics under hidden-unit permutation.}
+\label{tab:MLP}
+\resizebox{0.65\columnwidth}{!}{%
+    \begin{tabular}{lcc}
+    \toprule
+    \textbf{Metric} & \textbf{MLP-In} & \textbf{MLP-Out} \\
+    \midrule
+    % PCS & 0.003082 & 0.000077 \\
+    % ESD Norm                  & 1.000000 & 1.000000 \\
+    % ESD Log-Norm              & 1.000000 & 1.000000 \\
+    % ESD Spectral Norm         & 1.000000 & 1.000000 \\
+    % \ALPHAHILL              & 0.999993 & 0.999999 \\
+    PCS & 0.00 & 0.00 \\
+    % Frobenius\_Norm                  & 1.000 & 1.000 \\
+    Log\_Norm             & 1.00 & 1.00 \\
+    Spectral\_Norm        & 1.00 & 1.00 \\
+    Log\_Alpha\_Norm       & 1.00 & 1.00 \\
+    \rowcolor{black!10} \ALPHAHILL (ours)     & 1.00 & 1.00 \\
+    \bottomrule
+    \end{tabular}%
+}
+\end{table}
+
+
+% requires: \usepackage{booktabs}
+\begin{table}[h]
+\centering
+    \caption{Similarity scores of different metrics with increasing noise.}
+\label{tab:ablation_noise}
+\resizebox{0.95\columnwidth}{!}{%
+\begin{tabular}{lccccccc}
+\toprule
+$\boldsymbol{\gamma}$ & \textbf{0.05} & \textbf{0.10} & \textbf{0.20} & \textbf{0.30} & \textbf{0.50} & \textbf{1.00} & \textbf{2.00} \\
+\midrule
+PCS                 & 1.00 & 1.00 & 0.98 & 0.96 & 0.89 & 0.70 & 0.44 \\
+Log\_Norm           & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 \\
+Spectral\_Norm      & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 & 0.98 & 0.89 \\
+Log\_Alpha\_Norm    & 1.00 & 0.99 & 0.90 & 0.87 & 0.85 & 0.81 & 0.81 \\
+\rowcolor{black!10} \ALPHAHILL (ours)         & 1.00 & 1.00 & 1.00 & 0.99 & 0.98 & 0.98 & 0.96 \\
+\bottomrule
+\end{tabular}}
+
+\end{table}
+\begin{figure}
+    \centering
+    \includegraphics[width=\linewidth]{figs/Ablation_Noise/layerwise_noise_evolution.pdf}
+    \caption{\ALPHAHILL Evolution against Noise}
+    \label{fig:noise_evol}
+\end{figure}
+
+
+
+%\begin{figure}
+ %   \centering
+    %\includegraphics[width=0.7\linewidth]{figs/Ablation_Noise/trend.pdf}
+    %\caption{Similarity scores of different metrics with increasing noise. \puren{change to a table}}
+    % \label{fig:trend_noise}
+% \end{figure}

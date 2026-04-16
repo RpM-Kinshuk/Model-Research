@@ -1,0 +1,2 @@
+model_id,is_adapter,D,M,N,alpha,alpha_weighted,entropy,log_alpha_norm,log_norm,log_spectral_norm,longname,projection,layer,matrix_rank,norm,num_evals,spectral_norm,stable_rank,xmax,xmin,params
+unsloth/llama-2-13b-bnb-4bit,False,0.0179848074913024,32000,5120,4.253650665283203,16.95007861063263,1.1824603080749512,16.9500789642334,4.928699269047494,3.9848309004247096,lm_head,lm_head,,5120,84859.265625,5120,9656.748046875,8.787561321169722,9656.748046875,0.3205532431602478,163840000

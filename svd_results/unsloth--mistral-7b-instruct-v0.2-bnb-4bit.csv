@@ -1,0 +1,2 @@
+model_id,is_adapter,D,M,N,alpha,alpha_weighted,entropy,log_alpha_norm,log_norm,log_spectral_norm,longname,projection,layer,matrix_rank,norm,num_evals,spectral_norm,stable_rank,xmax,xmin,params
+unsloth/mistral-7b-instruct-v0.2-bnb-4bit,False,0.0211830139160156,32000,4096,4.679981231689453,11.357638055079194,1.1312305927276611,11.357638359069824,3.367203767895171,2.42685547073853,lm_head,lm_head,,4096,2329.183837890625,4096,267.2117004394531,8.71662368848399,267.2117004394531,0.0003940328897442,131072000

@@ -1,0 +1,2 @@
+model_id,is_adapter,D,M,N,alpha,alpha_weighted,entropy,log_alpha_norm,log_norm,log_spectral_norm,longname,projection,layer,matrix_rank,norm,num_evals,spectral_norm,stable_rank,xmax,xmin,params
+unsloth/llama-2-7b-chat-bnb-4bit,False,0.0402876734733581,32000,4096,5.6500020027160645,18.75724011407898,1.172753095626831,18.75724220275879,4.5665415233156,3.319864330147496,lm_head,lm_head,,4096,36858.828125,4096,2088.6435546875,17.647256298126354,2088.6435546875,0.5651757121086121,131072000

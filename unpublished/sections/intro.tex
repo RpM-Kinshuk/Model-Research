@@ -1,0 +1,61 @@
+\section{Introduction}\label{sec:intro}
+
+Publicly available large language models (LLMs) have been growing rapidly in recent years, with hundreds of thousands of models now available through open-source platforms such as Hugging Face (HF)~\citep{zhuang2025embedllm}. These models exhibit significant diversity in their training trajectories, including variations in model architecture, parameter scale, training data, and empirical performance~\citep{horwitz2025Atlas}. As the ecosystem grows, there is an increasing need for reliable and efficient methods to characterize, compare, and manage LLMs beyond task-level benchmarks. Representative examples include identifying whether deployed LLM systems can be traced to the same backbone foundation model for intellectual property and safety purposes~\citep{zhu2025independence}, as well as tracking and organizing model variants and versions in large-scale LLM databases~\citep{horwitz2025TreeHeritage}. Moreover, LLMs present distinct idiosyncrasies across downstream tasks, with different models specializing in different areas such as code generation, mathematical reasoning, long-context processing, or interactive dialogue. These considerations point to the need for a \emph{principled} and \emph{data-light} framework to trace model sources, capture model idiosyncrasies, and quantify model performances for large-scale LLM collections.
+
+
+In this work, we introduce a \emph{shape}-based perspective for LLM quantification that builds on insights from Heavy-Tailed \- Self-Regularization (HT-SR) theory~\citep{martin2021implicit,martin2020predicting_NatComm,martin2025setol}. HT-SR theory analyzes the eigenspectrum of weight matrices, and prior studies~\cite{yang2022evaluating,martin2020predicting_NatComm} have shown that the shape of the empirical spectral density (ESD) encodes informative signals about model capacity, quality, and training dynamics that are not well captured by scale-based measures. Moreover, ESD shape metrics are data-independent, computationally lightweight, and remain robust under noise and scaling. These properties make them particularly well-suited to large-scale LLM settings, where task-specific evaluation can be expensive. An overview of different quantification metrics is shown in Tab.~\ref{table:metric_overview}.
+
+
+We use the shape metric of the ESD, namely \ALPHAHILL, as a \emph{spectral signature} of each LLM. The \ALPHAHILL~metric summarizes the global structure of layer-wise weight eigenspectra into a compact representation, enabling efficient storage and comparison across large model collections. We adopt this spectral signature to support three downstream tasks: supervised model classification, unsupervised clustering of LLMs, and quantifying LLM performance.
+% , as shown in Fig.~\ref{fig:teaser}. 
+Our contributions are summarized below.
+%
+\begin{itemize}
+    \item We introduce a shape-based metric for reliably and efficiently characterizing, comparing, and quantifying LLMs beyond task-level benchmarks. Our metric is \emph{scale-invariant}, \emph{data-free}, \emph{theory-driven}, and \emph{easy to compute}. 
+    %
+    \item We curate a diverse and representative LLM corpus of up to 499 models and use it to benchmark three tasks: LLM similarity measurement, model classification and clustering, and performance prediction. We further conduct a systematic comparison of our spectral signature against various baselines across a range of experimental settings, demonstrating \emph{consistent effectiveness} across tasks and conditions.
+    %
+    \item We compare shape- and scale-based metrics under output-invariant reparameterizations and noise perturbations. ESD shape metrics remain stable, while scale-based baselines degrade, indicating that spectral shape captures intrinsic weight structure for reliable LLM quantification.
+\end{itemize}
+
+
+\begin{table*}[t!]
+  \caption{Comparisons of different metrics for LLM tasks. \largeGreenCheck~and \largeRedCross~denote strong and weak performance, respectively.}
+  \label{table:metric_overview}
+  \centering
+  \resizebox{0.98\linewidth}{!}{
+  \begin{tabular}{lcccccccc}
+    \toprule 
+    \textbf{Metrics} & \textbf{Scale-invariant} & \textbf{Data-free} & \textbf{Easy to compute} & \textbf{Scalable} & \textbf{Theory-driven} & \textbf{Classification} & \textbf{Clustering} & \textbf{Quantification}  \\ 
+    \midrule
+    
+    Logits~\cite{Yang2024AFF} &  
+    \largeGreenCheck &  \largeRedCross & \largeGreenCheck & \largeRedCross & \largeRedCross & \largeGreenCheck & \largeGreenCheck & \largeRedCross \\
+    \midrule
+
+    REEF~\cite{zhang2025reef} &  
+    \largeGreenCheck &  \largeRedCross & \largeGreenCheck & \largeRedCross & \largeRedCross & \largeGreenCheck & \largeGreenCheck & \largeRedCross\\
+    \midrule
+    
+    PCS~\cite{zeng2024HuRef} &  
+    \largeRedCross &  \largeGreenCheck & \largeGreenCheck & \largeRedCross & \largeRedCross & \largeGreenCheck & \largeGreenCheck & \largeRedCross \\
+    \midrule
+
+    Spectral norm &  
+    \largeRedCross &  \largeGreenCheck & \largeGreenCheck & \largeGreenCheck & \largeGreenCheck & \largeGreenCheck & \largeGreenCheck & \largeGreenCheck\\
+    \midrule
+    
+    Log alpha norm &  
+    \largeRedCross &  \largeGreenCheck & \largeGreenCheck & \largeGreenCheck & \largeGreenCheck & \largeGreenCheck & \largeGreenCheck & \largeGreenCheck \\
+    \midrule
+    
+    \textbf{Shape metric (Ours)} & \largeGreenCheck  &  \largeGreenCheck & \largeGreenCheck & \largeGreenCheck & \largeGreenCheck & \largeGreenCheck & \largeGreenCheck & \largeGreenCheck \\
+    \bottomrule
+  \end{tabular}}
+\end{table*}
+
+
+
+ 
+
+
