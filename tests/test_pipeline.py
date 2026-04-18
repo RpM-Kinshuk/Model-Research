@@ -412,6 +412,37 @@ class PipelineTests(unittest.TestCase):
             self.assertIn("`HOLD`", gate)
             self.assertIn("No heterogeneous-supported retrieval rows were produced.", gate)
 
+    def test_write_prediction_bridge_gate_mentions_no_rows_when_heterogeneous_slice_is_empty(self) -> None:
+        script_path = (
+            Path(__file__).resolve().parents[1] / "scripts" / "mixed_zoo_retrieval_research.py"
+        )
+        spec = importlib.util.spec_from_file_location("mixed_zoo_retrieval_research_cli", script_path)
+
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            pd.DataFrame(
+                [
+                    {
+                        "method": "structural_basics_only",
+                        "slice": "heterogeneous_supported",
+                        "num_queries": 0,
+                        "top1_accuracy": np.nan,
+                        "mrr": np.nan,
+                    }
+                ]
+            ).to_csv(out / "retrieval_metrics.csv", index=False)
+
+            module.write_prediction_bridge_gate(out)
+
+            gate = (out / "prediction_bridge_gate.md").read_text(encoding="utf-8")
+            self.assertIn("No heterogeneous-supported retrieval rows were produced.", gate)
+
 
 if __name__ == "__main__":
     unittest.main()

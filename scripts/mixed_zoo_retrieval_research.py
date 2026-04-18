@@ -453,9 +453,16 @@ def _mixed_zoo_split_payload(
     }
 
 
+def report_title_for_mode(benchmark_mode: str) -> str:
+    if benchmark_mode == "lean":
+        return "# Lean Mixed-Zoo Benchmark Report"
+    return "# Mixed-Zoo Retrieval Cycle 1 Report"
+
+
 def write_mixed_zoo_report(
     *,
     output_dir: Path,
+    benchmark_mode: str,
     methods: tuple[str, ...],
     split_payload: dict[str, object],
     retrieval_metrics: pd.DataFrame,
@@ -487,7 +494,7 @@ def write_mixed_zoo_report(
     ]
     neighborhood_columns = ["method", "family", "neighbor", "rank", "score"]
     lines = [
-        "# Mixed-Zoo Retrieval Cycle 1 Report",
+        report_title_for_mode(benchmark_mode),
         "",
         "Headline claim tested: model-intrinsic and spectral retrieval on a mixed zoo of homogeneous, heterogeneous, and unsupported models.",
         "",
@@ -495,6 +502,7 @@ def write_mixed_zoo_report(
         *[f"- {method}" for method in methods],
         "",
         "## Slice summary",
+        f"- benchmark_mode: {benchmark_mode}",
         f"- seed: {split_payload.get('seed', 'n/a')}",
         f"- min_family_size: {split_payload.get('min_family_size', 'n/a')}",
         f"- gallery_supported: {counts.get('gallery_supported', 'n/a')}",
@@ -516,11 +524,16 @@ def write_mixed_zoo_report(
     (output_dir / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def write_prediction_bridge_gate(output_dir: Path) -> None:
+def gate_method_for_benchmark_mode(benchmark_mode: str) -> str:
+    return "full_module_trace"
+
+
+def write_prediction_bridge_gate(output_dir: Path, *, benchmark_mode: str = "strict") -> None:
+    gate_method = gate_method_for_benchmark_mode(benchmark_mode)
     metrics = pd.read_csv(output_dir / "retrieval_metrics.csv")
     hetero = metrics[
         (metrics["slice"] == "heterogeneous_supported")
-        & (metrics["method"] == "full_module_trace")
+        & (metrics["method"] == gate_method)
     ]
     if hetero.empty:
         decision = "HOLD"
@@ -636,6 +649,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     write_mixed_zoo_report(
         output_dir=args.output_dir,
+        benchmark_mode=args.benchmark_mode,
         methods=methods,
         split_payload=split_payload,
         retrieval_metrics=retrieval_metrics,
@@ -643,7 +657,7 @@ def main(argv: list[str] | None = None) -> int:
         neighborhood=neighborhood,
     )
     if args.output_dir.exists():
-        write_prediction_bridge_gate(args.output_dir)
+        write_prediction_bridge_gate(args.output_dir, benchmark_mode=args.benchmark_mode)
     return 0
 
 
