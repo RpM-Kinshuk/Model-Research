@@ -10,6 +10,7 @@ from spectral_research.heterogeneity import (
     intrinsic_basics_feature_map,
     role_aggregated_trace_score,
     shared_role_trace_score,
+    structural_basics_feature_map,
 )
 
 
@@ -62,6 +63,59 @@ class HeterogeneityTests(unittest.TestCase):
         manifest = pd.DataFrame(columns=["model_id"])
 
         self.assertEqual(intrinsic_basics_feature_map(manifest), {})
+
+    def test_structural_basics_feature_map_excludes_architecture_and_params(self) -> None:
+        manifest = pd.DataFrame(
+            [
+                {
+                    "model_id": "model/a",
+                    "Architecture": "LlamaForCausalLM",
+                    "#Params (B)": 8.0,
+                    "num_layers": 32,
+                    "schema_name": "common_llm_7",
+                    "raw_module_count": 7,
+                    "common_schema": True,
+                },
+                {
+                    "model_id": "model/b",
+                    "Architecture": "QwenForCausalLM",
+                    "#Params (B)": 72.0,
+                    "num_layers": 32,
+                    "schema_name": "common_llm_7",
+                    "raw_module_count": 7,
+                    "common_schema": True,
+                },
+            ]
+        )
+
+        vectors = structural_basics_feature_map(manifest)
+
+        np.testing.assert_allclose(vectors["model/a"], vectors["model/b"])
+
+    def test_structural_basics_feature_map_uses_structural_fields(self) -> None:
+        manifest = pd.DataFrame(
+            [
+                {
+                    "model_id": "model/a",
+                    "num_layers": 32,
+                    "schema_name": "common_llm_7",
+                    "raw_module_count": 7,
+                    "common_schema": True,
+                },
+                {
+                    "model_id": "model/b",
+                    "num_layers": 40,
+                    "schema_name": "hetero_llm_5",
+                    "raw_module_count": 5,
+                    "common_schema": False,
+                },
+            ]
+        )
+
+        vectors = structural_basics_feature_map(manifest)
+
+        self.assertEqual(vectors["model/a"].shape, vectors["model/b"].shape)
+        self.assertFalse(np.allclose(vectors["model/a"], vectors["model/b"]))
 
     def test_shared_role_trace_score_uses_only_overlapping_roles(self) -> None:
         query_alpha = np.array([[1.0, 2.0], [2.0, 3.0]])

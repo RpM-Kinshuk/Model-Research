@@ -22,6 +22,13 @@ _INTRINSIC_COLUMNS = (
     "common_schema",
 )
 
+_STRUCTURAL_COLUMNS = (
+    "num_layers",
+    "schema_name",
+    "raw_module_count",
+    "common_schema",
+)
+
 
 def canonical_role(module_name: str) -> str | None:
     for suffix, role in ROLE_MAP.items():
@@ -70,6 +77,38 @@ def intrinsic_basics_feature_map(manifest: pd.DataFrame) -> dict[str, np.ndarray
     if features.empty:
         features = pd.DataFrame(index=frame.index)
 
+    vectors: dict[str, np.ndarray] = {}
+    for row in pd.concat([frame[["model_id"]], features], axis=1).itertuples(index=False):
+        vectors[str(row.model_id)] = np.asarray(row[1:], dtype=float)
+    return vectors
+
+
+def structural_basics_feature_map(manifest: pd.DataFrame) -> dict[str, np.ndarray]:
+    frame = manifest.copy()
+    if "model_id" not in frame.columns:
+        return {}
+    if frame.empty:
+        return {}
+
+    columns = [column for column in _STRUCTURAL_COLUMNS if column in frame.columns]
+    if not columns:
+        raise ValueError("no structural feature columns are available")
+    structural = frame.loc[:, columns].copy()
+
+    numeric_columns = ["num_layers", "raw_module_count"]
+    numeric = pd.DataFrame(index=frame.index)
+    for column in numeric_columns:
+        if column in structural.columns:
+            numeric[column] = pd.to_numeric(structural[column], errors="coerce").fillna(-1.0)
+
+    categorical_columns = [column for column in structural.columns if column not in numeric.columns]
+    if categorical_columns:
+        categorical = structural.loc[:, categorical_columns].fillna("unknown").astype(str)
+        categorical = pd.get_dummies(categorical, prefix=categorical_columns, dtype=float)
+    else:
+        categorical = pd.DataFrame(index=frame.index)
+
+    features = pd.concat([numeric, categorical], axis=1)
     vectors: dict[str, np.ndarray] = {}
     for row in pd.concat([frame[["model_id"]], features], axis=1).itertuples(index=False):
         vectors[str(row.model_id)] = np.asarray(row[1:], dtype=float)
@@ -168,4 +207,5 @@ __all__ = [
     "intrinsic_basics_feature_map",
     "role_aggregated_trace_score",
     "shared_role_trace_score",
+    "structural_basics_feature_map",
 ]
