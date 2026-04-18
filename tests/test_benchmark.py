@@ -2,12 +2,30 @@ from __future__ import annotations
 
 import unittest
 
+import numpy as np
 import pandas as pd
 
 from spectral_research.benchmark import build_audit_manifest
 
 
 class AuditManifestTests(unittest.TestCase):
+    @staticmethod
+    def _manifest_row(
+        model_id: str,
+        family: str | None,
+        *,
+        label_status: str = "confirmed",
+        query_bucket: str = "supported_candidate",
+        common_schema: bool = True,
+    ) -> dict[str, object]:
+        return {
+            "model_id": model_id,
+            "audited_base_family": family,
+            "label_status": label_status,
+            "query_bucket": query_bucket,
+            "common_schema": common_schema,
+        }
+
     @staticmethod
     def _leaderboard_signature(row: pd.Series) -> tuple[object, object, object]:
         values = []
@@ -329,6 +347,192 @@ class AuditManifestTests(unittest.TestCase):
         self.assertEqual(manifest_a.loc["dup-a", "Architecture"], manifest_b.loc["dup-a", "Architecture"])
         self.assertEqual(manifest_a.loc["dup-a", "size_bucket"], "medium")
         self.assertEqual(manifest_a.loc["dup-a", "size_bucket"], manifest_b.loc["dup-a", "size_bucket"])
+
+    def test_repo_ids_join_after_slash_to_dash_normalization(self) -> None:
+        records = pd.DataFrame(
+            [
+                {
+                    "model_id": "meta-llama--Llama-2-7b",
+                    "display_name": "meta-llama/Llama-2-7b",
+                    "common_schema": True,
+                    "schema_name": "common_llm_7",
+                }
+            ]
+        )
+        metadata = pd.DataFrame(
+            [
+                {
+                    "model_id": "meta-llama/Llama-2-7b",
+                    "source_model": "unknown",
+                    "base_model_relation": "source",
+                }
+            ]
+        )
+        leaderboard = pd.DataFrame(
+            [
+                {
+                    "model_id": "meta-llama/Llama-2-7b",
+                    "Architecture": "LlamaForCausalLM",
+                    "#Params (B)": 7.0,
+                    "Generation": 1,
+                    "Type": "base",
+                }
+            ]
+        )
+        overrides = pd.DataFrame(
+            [
+                {
+                    "model_id": "meta-llama/Llama-2-7b",
+                    "audited_base_family": "meta-llama/Llama-2-7b",
+                    "label_status": "confirmed",
+                    "bucket_override": "",
+                }
+            ]
+        )
+
+        manifest = build_audit_manifest(records, metadata, leaderboard, overrides).set_index(
+            "model_id"
+        )
+
+        self.assertEqual(
+            manifest.loc["meta-llama--Llama-2-7b", "audited_base_family"],
+            "meta-llama/Llama-2-7b",
+        )
+        self.assertEqual(
+            manifest.loc["meta-llama--Llama-2-7b", "Architecture"],
+            "LlamaForCausalLM",
+        )
+        self.assertEqual(
+            manifest.loc["meta-llama--Llama-2-7b", "label_status"],
+            "confirmed",
+        )
+
+    def test_split_artifacts_partition_supported_families_deterministically(self) -> None:
+        from spectral_research.benchmark import build_split_artifacts
+
+        families = [f"fam-{suffix}" for suffix in "abcdef"]
+        manifest = pd.DataFrame(
+            [
+                self._manifest_row(f"{family}-{index}", family)
+                for family in families
+                for index in range(5)
+            ]
+        )
+
+        artifacts = build_split_artifacts(
+            manifest,
+            min_family_size=5,
+            calibration_fraction=0.5,
+            seed=7,
+        )
+
+        self.assertEqual(
+            set(artifacts),
+            {
+                "gallery_supported",
+                "queries_supported",
+                "queries_unsupported",
+                "queries_heterogeneous",
+            },
+        )
+
+        gallery = artifacts["gallery_supported"]
+        queries = artifacts["queries_supported"]
+        self.assertEqual(set(gallery["audited_base_family"]), set(families))
+        self.assertEqual(set(queries["audited_base_family"]), set(families))
+        self.assertTrue(artifacts["queries_unsupported"].empty)
+        self.assertTrue(artifacts["queries_heterogeneous"].empty)
+
+        calibration_families = set(
+            np.random.default_rng(7).permutation(sorted(families))[:3].tolist()
+        )
+        for family in families:
+            gallery_ids = gallery.loc[
+                gallery["audited_base_family"].eq(family), "model_id"
+            ].tolist()
+            query_ids = queries.loc[
+                queries["audited_base_family"].eq(family), "model_id"
+            ].tolist()
+            expected_ids = [f"{family}-{index}" for index in range(5)]
+
+            self.assertEqual(gallery_ids, expected_ids[:4])
+            self.assertEqual(query_ids, expected_ids[4:])
+
+            split_role = queries.loc[
+                queries["audited_base_family"].eq(family), "split_role"
+            ].iloc[0]
+            expected_role = (
+                "calibration_supported"
+                if family in calibration_families
+                else "test_supported"
+            )
+            self.assertEqual(split_role, expected_role)
+
+    def test_split_artifacts_relax_family_size_and_route_non_primary_rows(self) -> None:
+        from spectral_research.benchmark import build_split_artifacts
+
+        kept_families = [f"fam-{suffix}" for suffix in "abcde"]
+        manifest_rows = [
+            self._manifest_row(f"{family}-{index}", family)
+            for family in kept_families
+            for index in range(5)
+        ]
+        manifest_rows.extend(
+            [
+                self._manifest_row("small-0", "fam-small"),
+                self._manifest_row("small-1", "fam-small"),
+                self._manifest_row("small-2", "fam-small"),
+                self._manifest_row("small-3", "fam-small"),
+                self._manifest_row(
+                    "unknown-0",
+                    "fam-unknown",
+                    query_bucket="unsupported_unknown",
+                ),
+                self._manifest_row(
+                    "special-0",
+                    "fam-special",
+                    query_bucket="unsupported_special",
+                ),
+                self._manifest_row(
+                    "hetero-0",
+                    "fam-a",
+                    query_bucket="heterogeneous",
+                    common_schema=False,
+                ),
+                self._manifest_row(
+                    "hetero-unknown",
+                    "fam-z",
+                    label_status="unknown",
+                    query_bucket="heterogeneous",
+                    common_schema=False,
+                ),
+            ]
+        )
+        manifest = pd.DataFrame(manifest_rows)
+
+        artifacts = build_split_artifacts(
+            manifest,
+            min_family_size=6,
+            calibration_fraction=0.4,
+            seed=3,
+        )
+
+        gallery = artifacts["gallery_supported"]
+        queries = artifacts["queries_supported"]
+        unsupported = artifacts["queries_unsupported"]
+        heterogeneous = artifacts["queries_heterogeneous"]
+
+        self.assertEqual(set(gallery["audited_base_family"]), set(kept_families))
+        self.assertEqual(set(queries["audited_base_family"]), set(kept_families))
+        self.assertEqual(len(gallery), 20)
+        self.assertEqual(len(queries), 5)
+        self.assertEqual(set(unsupported["split_role"]), {"unsupported_query"})
+        self.assertEqual(set(heterogeneous["split_role"]), {"heterogeneous_query"})
+        self.assertEqual(
+            set(unsupported["model_id"]),
+            {"small-0", "small-1", "small-2", "small-3", "unknown-0", "special-0"},
+        )
+        self.assertEqual(heterogeneous["model_id"].tolist(), ["hetero-0"])
 
 
 if __name__ == "__main__":
