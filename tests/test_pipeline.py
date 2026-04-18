@@ -51,6 +51,20 @@ class PipelineTests(unittest.TestCase):
 
         self.assertTrue(np.isfinite(score))
 
+    def test_score_query_supports_structural_basics_only(self) -> None:
+        row = pd.Series({"model_id": "query/a"})
+
+        score = _score_query(
+            method="structural_basics_only",
+            row=row,
+            record=None,
+            prototype=self._prototype(),
+            metadata_vectors={"query/a": np.array([1.0, 2.0], dtype=float)},
+            parent_scores=None,
+        )
+
+        self.assertTrue(np.isfinite(score))
+
     def test_score_query_supports_shared_role_trace(self) -> None:
         row = pd.Series({"model_id": "query/a"})
 

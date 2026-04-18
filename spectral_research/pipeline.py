@@ -301,7 +301,7 @@ def _score_query(
         if parent_scores is None:
             return float("nan")
         return float(parent_scores["hybrid_lite"].get(prototype.family, float("nan")))
-    if method in {"intrinsic_basics_only", "metadata_only"}:
+    if method in {"intrinsic_basics_only", "structural_basics_only", "metadata_only"}:
         vector = metadata_vectors.get(str(row["model_id"]))
         if vector is None:
             return float("nan")
@@ -647,7 +647,7 @@ def _rejection_outputs(
 
 
 def _prototype_score(method: str, left: FamilyPrototype, right: FamilyPrototype) -> float:
-    if method in {"intrinsic_basics_only", "metadata_only"}:
+    if method in {"intrinsic_basics_only", "structural_basics_only", "metadata_only"}:
         return _negative_l2(left.metadata_vector, right.metadata_vector)
     if method == "pl_alpha_scalar":
         return _negative_l2(left.scalar_vector, right.scalar_vector)
