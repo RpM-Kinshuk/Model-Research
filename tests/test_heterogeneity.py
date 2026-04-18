@@ -58,6 +58,11 @@ class HeterogeneityTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             intrinsic_basics_feature_map(manifest)
 
+    def test_intrinsic_basics_feature_map_returns_empty_map_for_empty_manifest(self) -> None:
+        manifest = pd.DataFrame(columns=["model_id"])
+
+        self.assertEqual(intrinsic_basics_feature_map(manifest), {})
+
     def test_shared_role_trace_score_uses_only_overlapping_roles(self) -> None:
         query_alpha = np.array([[1.0, 2.0], [2.0, 3.0]])
         query_modules = ("self_attn.q_proj", "mlp.down_proj")

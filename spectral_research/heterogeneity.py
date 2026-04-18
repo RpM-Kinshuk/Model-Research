@@ -43,6 +43,8 @@ def intrinsic_basics_feature_map(manifest: pd.DataFrame) -> dict[str, np.ndarray
     frame = manifest.copy()
     if "model_id" not in frame.columns:
         return {}
+    if frame.empty:
+        return {}
 
     intrinsic_columns = [column for column in _INTRINSIC_COLUMNS if column in frame.columns]
     if not intrinsic_columns:
