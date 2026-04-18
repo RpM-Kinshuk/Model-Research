@@ -52,6 +52,12 @@ class HeterogeneityTests(unittest.TestCase):
 
         np.testing.assert_allclose(vectors["model/a"], vectors["model/b"])
 
+    def test_intrinsic_basics_feature_map_fails_when_no_intrinsic_features_exist(self) -> None:
+        manifest = pd.DataFrame([{"model_id": "model/a"}])
+
+        with self.assertRaises(ValueError):
+            intrinsic_basics_feature_map(manifest)
+
     def test_shared_role_trace_score_uses_only_overlapping_roles(self) -> None:
         query_alpha = np.array([[1.0, 2.0], [2.0, 3.0]])
         query_modules = ("self_attn.q_proj", "mlp.down_proj")
@@ -69,6 +75,21 @@ class HeterogeneityTests(unittest.TestCase):
         self.assertTrue(np.isfinite(score))
         self.assertGreater(score, -1.0)
 
+    def test_shared_role_trace_score_rejects_alpha_module_width_mismatch(self) -> None:
+        query_alpha = np.array([[1.0, 2.0]])
+        query_modules = ("self_attn.q_proj",)
+        proto_alpha = np.array([[1.0, 2.0]])
+        proto_modules = ("self_attn.q_proj", "mlp.down_proj")
+
+        with self.assertRaises(ValueError):
+            shared_role_trace_score(
+                query_alpha=query_alpha,
+                query_modules=query_modules,
+                proto_alpha=proto_alpha,
+                proto_modules=proto_modules,
+                overlap_penalty=0.2,
+            )
+
     def test_role_aggregated_trace_score_handles_schema_mismatch(self) -> None:
         query_alpha = np.array([[1.0, 2.0], [2.0, 4.0]])
         query_modules = ("self_attn.q_proj", "self_attn.o_proj")
@@ -84,6 +105,21 @@ class HeterogeneityTests(unittest.TestCase):
         )
 
         self.assertTrue(np.isfinite(score))
+
+    def test_role_aggregated_trace_score_rejects_alpha_module_width_mismatch(self) -> None:
+        query_alpha = np.array([[1.0, 2.0]])
+        query_modules = ("self_attn.q_proj",)
+        proto_alpha = np.array([[1.0, 2.0]])
+        proto_modules = ("self_attn.q_proj", "mlp.down_proj")
+
+        with self.assertRaises(ValueError):
+            role_aggregated_trace_score(
+                query_alpha=query_alpha,
+                query_modules=query_modules,
+                proto_alpha=proto_alpha,
+                proto_modules=proto_modules,
+                overlap_penalty=0.2,
+            )
 
 
 if __name__ == "__main__":

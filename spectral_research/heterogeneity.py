@@ -30,12 +30,23 @@ def canonical_role(module_name: str) -> str | None:
     return None
 
 
+def _validate_alpha_modules(alpha: np.ndarray, modules: tuple[str, ...]) -> np.ndarray:
+    arr = np.asarray(alpha, dtype=float)
+    if arr.ndim != 2:
+        raise ValueError("alpha must be a 2D array")
+    if arr.shape[1] != len(modules):
+        raise ValueError("alpha width must match the number of modules")
+    return arr
+
+
 def intrinsic_basics_feature_map(manifest: pd.DataFrame) -> dict[str, np.ndarray]:
     frame = manifest.copy()
     if "model_id" not in frame.columns:
         return {}
 
     intrinsic_columns = [column for column in _INTRINSIC_COLUMNS if column in frame.columns]
+    if not intrinsic_columns:
+        raise ValueError("no intrinsic feature columns are available")
     intrinsic = frame.loc[:, intrinsic_columns].copy()
 
     numeric_columns = ["#Params (B)", "num_layers", "raw_module_count"]
@@ -64,7 +75,7 @@ def intrinsic_basics_feature_map(manifest: pd.DataFrame) -> dict[str, np.ndarray
 
 
 def _role_traces(alpha: np.ndarray, modules: tuple[str, ...]) -> dict[str, np.ndarray]:
-    arr = np.asarray(alpha, dtype=float)
+    arr = _validate_alpha_modules(alpha, modules)
     grouped: dict[str, list[np.ndarray]] = {}
     for index, module in enumerate(modules):
         role = canonical_role(module)
