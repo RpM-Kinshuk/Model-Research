@@ -94,6 +94,22 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(args.min_family_size, 6)
         self.assertEqual(args.seed, 9)
 
+    def test_rejection_confidence_study_cli_accepts_output_dir(self) -> None:
+        script_path = (
+            Path(__file__).resolve().parents[1] / "scripts" / "rejection_confidence_study.py"
+        )
+        spec = importlib.util.spec_from_file_location("rejection_confidence_study_cli", script_path)
+
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        args = module.parse_args(["--output-dir", "out"])
+
+        self.assertEqual(args.output_dir, Path("out"))
+
 
 if __name__ == "__main__":
     unittest.main()
