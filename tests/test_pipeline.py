@@ -192,6 +192,202 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("--output-dir", result.stdout)
 
+    def test_mixed_zoo_parse_args_accepts_benchmark_mode(self) -> None:
+        script_path = (
+            Path(__file__).resolve().parents[1] / "scripts" / "mixed_zoo_retrieval_research.py"
+        )
+        spec = importlib.util.spec_from_file_location("mixed_zoo_retrieval_research_cli", script_path)
+
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        args = module.parse_args(["--benchmark-mode", "lean", "--output-dir", "out"])
+
+        self.assertEqual(args.benchmark_mode, "lean")
+        self.assertEqual(args.output_dir, Path("out"))
+
+    def test_build_supported_slices_allows_provisional_labels_in_lean_mode(self) -> None:
+        script_path = (
+            Path(__file__).resolve().parents[1] / "scripts" / "mixed_zoo_retrieval_research.py"
+        )
+        spec = importlib.util.spec_from_file_location("mixed_zoo_retrieval_research_cli", script_path)
+
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        manifest = pd.DataFrame(
+            [
+                {
+                    "model_id": f"hetero-{i}",
+                    "audited_base_family": "fam/x",
+                    "label_status": "provisional",
+                    "query_bucket": "supported_candidate",
+                    "common_schema": False,
+                }
+                for i in range(5)
+            ]
+        )
+
+        strict = module.build_supported_candidate_slices(
+            manifest,
+            min_family_size=5,
+            benchmark_mode="strict",
+        )
+        lean = module.build_supported_candidate_slices(
+            manifest,
+            min_family_size=5,
+            benchmark_mode="lean",
+        )
+
+        self.assertTrue(strict["heterogeneous_supported"].empty)
+        self.assertEqual(len(lean["heterogeneous_supported"]), 5)
+
+    def test_mixed_zoo_build_supported_split_frames_preserves_slice_labels(self) -> None:
+        script_path = (
+            Path(__file__).resolve().parents[1] / "scripts" / "mixed_zoo_retrieval_research.py"
+        )
+        spec = importlib.util.spec_from_file_location("mixed_zoo_retrieval_research_cli", script_path)
+
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        homogeneous = pd.DataFrame(
+            [
+                {"model_id": f"h-{i}", "audited_base_family": "fam/h"}
+                for i in range(5)
+            ]
+        )
+        heterogeneous = pd.DataFrame(
+            [
+                {"model_id": f"x-{i}", "audited_base_family": "fam/x"}
+                for i in range(5)
+            ]
+        )
+
+        gallery_supported, queries_supported, calibration_families = module.build_supported_split_frames(
+            {
+                "homogeneous_supported": homogeneous,
+                "heterogeneous_supported": heterogeneous,
+            }
+        )
+
+        self.assertGreater(len(gallery_supported), 0)
+        self.assertEqual(
+            set(queries_supported["evaluation_slice"].tolist()),
+            {"homogeneous_supported", "heterogeneous_supported"},
+        )
+        self.assertTrue(
+            set(queries_supported["split_role"].tolist()).issubset(
+                {"calibration_supported", "test_supported"}
+            )
+        )
+        self.assertGreaterEqual(len(calibration_families), 1)
+        self.assertLessEqual(len(calibration_families), 2)
+
+    def test_mixed_zoo_prediction_bridge_gate_holds_without_heterogeneous_rows(self) -> None:
+        script_path = (
+            Path(__file__).resolve().parents[1] / "scripts" / "mixed_zoo_retrieval_research.py"
+        )
+        spec = importlib.util.spec_from_file_location("mixed_zoo_retrieval_research_cli", script_path)
+
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            pd.DataFrame(
+                [
+                    {
+                        "method": "full_module_trace",
+                        "slice": "all",
+                        "top1_accuracy": 0.9,
+                        "mrr": 0.95,
+                    }
+                ]
+            ).to_csv(out / "retrieval_metrics.csv", index=False)
+
+            module.write_prediction_bridge_gate(out)
+
+            gate = (out / "prediction_bridge_gate.md").read_text(encoding="utf-8")
+            self.assertIn("`HOLD`", gate)
+            self.assertIn("No heterogeneous-supported retrieval rows were produced.", gate)
+
+    def test_mixed_zoo_prediction_bridge_gate_goes_when_heterogeneous_signal_is_strong(self) -> None:
+        script_path = (
+            Path(__file__).resolve().parents[1] / "scripts" / "mixed_zoo_retrieval_research.py"
+        )
+        spec = importlib.util.spec_from_file_location("mixed_zoo_retrieval_research_cli", script_path)
+
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            pd.DataFrame(
+                [
+                    {
+                        "method": "full_module_trace",
+                        "slice": "heterogeneous_supported",
+                        "num_queries": 3,
+                        "top1_accuracy": 0.60,
+                        "mrr": 0.70,
+                    }
+                ]
+            ).to_csv(out / "retrieval_metrics.csv", index=False)
+
+            module.write_prediction_bridge_gate(out)
+
+            gate = (out / "prediction_bridge_gate.md").read_text(encoding="utf-8")
+            self.assertIn("`GO`", gate)
+            self.assertIn("Mixed-zoo spectral neighborhoods are strong enough", gate)
+
+    def test_mixed_zoo_prediction_bridge_gate_holds_when_heterogeneous_row_has_no_queries(self) -> None:
+        script_path = (
+            Path(__file__).resolve().parents[1] / "scripts" / "mixed_zoo_retrieval_research.py"
+        )
+        spec = importlib.util.spec_from_file_location("mixed_zoo_retrieval_research_cli", script_path)
+
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            pd.DataFrame(
+                [
+                    {
+                        "method": "full_module_trace",
+                        "slice": "heterogeneous_supported",
+                        "num_queries": 0,
+                        "top1_accuracy": np.nan,
+                        "mrr": np.nan,
+                    }
+                ]
+            ).to_csv(out / "retrieval_metrics.csv", index=False)
+
+            module.write_prediction_bridge_gate(out)
+
+            gate = (out / "prediction_bridge_gate.md").read_text(encoding="utf-8")
+            self.assertIn("`HOLD`", gate)
+            self.assertIn("No heterogeneous-supported retrieval rows were produced.", gate)
+
 
 if __name__ == "__main__":
     unittest.main()
