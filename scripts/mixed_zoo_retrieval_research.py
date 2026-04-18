@@ -35,8 +35,15 @@ from spectral_research.pipeline import (
     write_benchmark_artifacts,
 )
 
-MIXED_ZOO_METHODS = (
+STRICT_METHODS = (
     "intrinsic_basics_only",
+    "pl_alpha_scalar",
+    "full_module_trace",
+    "shared_role_trace",
+    "role_aggregated_trace",
+)
+LEAN_METHODS = (
+    "structural_basics_only",
     "pl_alpha_scalar",
     "full_module_trace",
     "shared_role_trace",
@@ -124,6 +131,25 @@ def build_supported_candidate_slices(
         "unsupported_special": unsupported_special.sort_values("model_id").reset_index(drop=True),
         "unsupported_unknown": unsupported_unknown.sort_values("model_id").reset_index(drop=True),
     }
+
+
+def methods_for_benchmark_mode(benchmark_mode: str) -> tuple[str, ...]:
+    if benchmark_mode == "strict":
+        return STRICT_METHODS
+    if benchmark_mode == "lean":
+        return LEAN_METHODS
+    raise ValueError(f"unsupported benchmark mode: {benchmark_mode}")
+
+
+def metadata_vectors_for_benchmark_mode(
+    audited_manifest: pd.DataFrame,
+    benchmark_mode: str,
+) -> dict[str, np.ndarray]:
+    if benchmark_mode == "strict":
+        return intrinsic_basics_feature_map(audited_manifest)
+    if benchmark_mode == "lean":
+        return structural_basics_feature_map(audited_manifest)
+    raise ValueError(f"unsupported benchmark mode: {benchmark_mode}")
 
 
 def build_supported_split_frames(
@@ -552,12 +578,16 @@ def main(argv: list[str] | None = None) -> int:
     queries_unsupported = _unsupported_queries_frame(slices)
     queries_heterogeneous = slices.get("heterogeneous_supported", pd.DataFrame()).copy()
 
-    metadata_vectors = intrinsic_basics_feature_map(audited_manifest)
+    methods = methods_for_benchmark_mode(args.benchmark_mode)
+    metadata_vectors = metadata_vectors_for_benchmark_mode(
+        audited_manifest,
+        args.benchmark_mode,
+    )
     records_by_model_id = _record_lookup(records)
     prototypes = _family_prototypes(gallery_supported, records_by_model_id, metadata_vectors)
 
     calibration_top_scores = _calibration_top_scores(
-        MIXED_ZOO_METHODS,
+        methods,
         queries_supported,
         prototypes,
         records_by_model_id,
@@ -565,14 +595,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     thresholds = _thresholds_from_top_scores(calibration_top_scores)
     retrieval_metrics = _mixed_zoo_retrieval_rows(
-        MIXED_ZOO_METHODS,
+        methods,
         queries_supported,
         prototypes,
         records_by_model_id,
         metadata_vectors,
     )
     rejection_metrics, risk_coverage = _mixed_zoo_rejection_outputs(
-        MIXED_ZOO_METHODS,
+        methods,
         thresholds,
         queries_supported,
         queries_unsupported,
@@ -580,7 +610,7 @@ def main(argv: list[str] | None = None) -> int:
         records_by_model_id,
         metadata_vectors,
     )
-    neighborhood = _family_neighborhood(MIXED_ZOO_METHODS, prototypes)
+    neighborhood = _family_neighborhood(methods, prototypes)
     split_payload = _mixed_zoo_split_payload(
         seed=DEFAULT_SEED,
         min_family_size=args.min_family_size,
@@ -606,7 +636,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     write_mixed_zoo_report(
         output_dir=args.output_dir,
-        methods=MIXED_ZOO_METHODS,
+        methods=methods,
         split_payload=split_payload,
         retrieval_metrics=retrieval_metrics,
         rejection_metrics=rejection_metrics,

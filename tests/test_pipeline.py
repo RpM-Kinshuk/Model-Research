@@ -248,6 +248,30 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(strict["heterogeneous_supported"].empty)
         self.assertEqual(len(lean["heterogeneous_supported"]), 5)
 
+    def test_mixed_zoo_methods_use_structural_baseline_in_lean_mode(self) -> None:
+        script_path = (
+            Path(__file__).resolve().parents[1] / "scripts" / "mixed_zoo_retrieval_research.py"
+        )
+        spec = importlib.util.spec_from_file_location("mixed_zoo_retrieval_research_cli", script_path)
+
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        self.assertEqual(module.methods_for_benchmark_mode("strict")[0], "intrinsic_basics_only")
+        self.assertEqual(module.methods_for_benchmark_mode("lean")[0], "structural_basics_only")
+        self.assertEqual(
+            module.methods_for_benchmark_mode("lean")[1:],
+            (
+                "pl_alpha_scalar",
+                "full_module_trace",
+                "shared_role_trace",
+                "role_aggregated_trace",
+            ),
+        )
+
     def test_mixed_zoo_build_supported_split_frames_preserves_slice_labels(self) -> None:
         script_path = (
             Path(__file__).resolve().parents[1] / "scripts" / "mixed_zoo_retrieval_research.py"
