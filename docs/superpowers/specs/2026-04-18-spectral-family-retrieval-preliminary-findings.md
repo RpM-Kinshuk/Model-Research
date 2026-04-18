@@ -282,15 +282,153 @@ This means:
 - the system can notice some more obvious out-of-distribution cases
 - but it still struggles on the messy, ambiguous unknowns
 
+## Benchmark Expansion Cycle 1
+
+We then tested one minimal benchmark-expansion pass without changing the retrieval methods.
+
+First, we reran the strict benchmark with `min_family_size=5` but kept the same strict freeze.
+That changed nothing.
+So the family cutoff by itself was **not** the real bottleneck.
+
+Next, we created an experimental derived freeze that promoted only three near-miss official base families:
+
+- `mistralai/Mistral-7B-v0.3`
+- `mistralai/Mistral-Small-24B-Base-2501`
+- `Qwen/Qwen2.5-1.5B`
+
+That expansion changed the benchmark from:
+
+- `12` to `15` confirmed families
+- `225` to `241` confirmed rows
+- `153` to `165` gallery rows
+- `72` to `76` supported queries
+
+But the retrieval quality dropped enough that this is **not** a better headline benchmark.
+
+Main `all`-slice deltas:
+
+- `full_module_trace`: top-1 `0.918 -> 0.881`, MRR `0.950 -> 0.914`
+- `attention_trace`: top-1 `0.918 -> 0.881`, MRR `0.946 -> 0.914`
+- `pl_alpha_scalar`: top-1 `0.857 -> 0.786`, MRR `0.903 -> 0.852`
+
+Interpretation:
+
+- the expansion is real and worth keeping as an exploratory artifact
+- it does **not** replace the current strict headline benchmark
+- the next higher-value benchmark task is metadata cleanup on the confirmed strict slice, not lowering the support bar further
+
+## Metadata Cleanup Cycle 1
+
+We then backfilled the missing metadata on the confirmed strict slice.
+
+The backfill was fully local:
+
+- we kept the same strict freeze
+- we kept the same family set
+- we filled missing `Architecture`, `#Params (B)`, `Generation`, and `Type`
+- the values came from the official base-family rows already present in `sampled_leaderboard.csv`
+
+This changed metadata coverage from:
+
+- `41 / 225` confirmed rows with architecture metadata
+- to `225 / 225`
+
+The mechanical result was good:
+
+- the matched slices now cover the full supported query set instead of only `17` queries
+- the main spectral retrieval results stayed stable
+
+For example:
+
+- `full_module_trace`, all slice: unchanged at top-1 `0.918`, MRR `0.950`
+- `attention_trace`, all slice: unchanged at top-1 `0.918`, MRR `0.946`
+
+But the cleanup also exposed a benchmark limitation:
+
+- `metadata_only` became extremely strong after backfill
+- it jumped from top-1 `0.184`, MRR `0.323`
+- to top-1 `0.918`, MRR `0.959`
+
+Interpretation:
+
+- the cleanup itself was correct and useful
+- on this narrow strict root/base benchmark, canonical architecture plus parameter size already identify the family very well
+- so the metadata-complete benchmark is better documented, but it no longer supports a strong claim that spectral fingerprints clearly beat metadata
+
+This changes the next priority:
+
+- not more metadata filling
+- not more family expansion
+- instead, stronger metadata-controlled evaluation on the same retrieval task
+
+## Mixed-Zoo Lean Benchmark
+
+We then added a broader mixed-zoo benchmark to stop overfitting the story to the narrow strict root/base slice.
+
+This lean benchmark changes two things:
+
+- it removes `Architecture` and `#Params (B)` from the baseline inputs
+- it allows `confirmed + provisional` supported rows, especially for heterogeneous models
+
+The point was not to replace the strict benchmark.
+The point was to add a broader zoo-oriented probe while keeping the strict benchmark as a clean control.
+
+The lean benchmark uses:
+
+- `structural_basics_only`
+  - model-intrinsic structure only: `num_layers`, `raw_module_count`, `common_schema`, `schema_name`
+- `pl_alpha_scalar`
+- `full_module_trace`
+- `shared_role_trace`
+- `role_aggregated_trace`
+
+The crucial curation fix was simple:
+
+- homogeneous supported rows come from `supported_candidate`
+- heterogeneous supported rows come from the `heterogeneous` bucket itself
+
+That produced a real wider heterogeneous slice instead of a fake zero:
+
+- gallery supported: `184`
+- supported queries: `86`
+- homogeneous test queries: `58`
+- heterogeneous test queries: `14`
+- heterogeneous supported pool before split: `45`
+- unsupported special: `312`
+- unsupported unknown: `1549`
+
+The heterogeneous-supported results are the most important part:
+
+- `structural_basics_only`: top-1 `0.714`, MRR `0.845`
+- `pl_alpha_scalar`: top-1 `0.786`, MRR `0.893`
+- `full_module_trace`: top-1 `0.857`, MRR `0.907`
+- `shared_role_trace`: top-1 `0.857`, MRR `0.907`
+- `role_aggregated_trace`: top-1 `0.929`, MRR `0.964`
+
+Interpretation:
+
+- we now have a real broader heterogeneous test slice
+- spectral methods still add value beyond simple structural basics
+- the current best heterogeneity-capable method is `role_aggregated_trace`
+- the strict benchmark should now be treated as the clean control, while the lean benchmark is the broader mixed-zoo probe
+
 ## What We Can Claim Now
 
 We can claim this:
 
-`Module-aware spectral traces are effective for base-family retrieval on a clean audited benchmark, and they clearly outperform plain metadata baselines.`
+`Module-aware spectral traces are effective for base-family retrieval on a clean audited benchmark.`
 
 We can also say this:
 
 `A simple confidence rule that uses both best score and top-two margin improves rejection slightly for the trace methods.`
+
+And after metadata cleanup, we can say this:
+
+`On the metadata-complete version of this narrow strict benchmark, metadata itself becomes a very strong control, so the next discriminating evaluation must control metadata more tightly.`
+
+And after the lean mixed-zoo run, we can also say this:
+
+`A broader heterogeneous test slice is now viable, and a simple heterogeneity-aware spectral method can perform strongly on it.`
 
 ## What We Should Not Claim Yet
 
@@ -305,7 +443,13 @@ We should **not** claim this yet:
 
 The strongest framing right now is:
 
-`module-aware spectral candidate generation for base-family retrieval`
+`model-intrinsic spectral retrieval for organizing a mixed zoo of models`
+
+Operationally, that means:
+
+- strict benchmark = clean homogeneous control
+- lean benchmark = broader mixed-zoo probe
+- current best heterogeneous method = `role_aggregated_trace`
 
 The rejection result should be treated as:
 
@@ -324,6 +468,11 @@ Rejection mini-study:
 
 - [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/rejection_confidence_study_strict_v1/report.md)
 
+Lean mixed-zoo benchmark:
+
+- [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/lean_mixed_zoo_benchmark/report.md)
+- [retrieval_metrics.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/lean_mixed_zoo_benchmark/retrieval_metrics.csv)
+
 Implementation history:
 
 - `abd1f5c` `feat: run audited spectral family retrieval preliminaries`
@@ -338,9 +487,11 @@ The preliminary stage succeeded.
 The main retrieval story is now believable.
 The benchmark is much cleaner than it was at the start.
 The rejection story improved a little, but it is still a side result.
+And we now have a real heterogeneous probe instead of only a homogeneous control.
 
 So the next move should be:
 
 - consolidate this into the paper outline
-- keep the center on retrieval
+- keep the center on model-zoo retrieval and organization
+- use the strict benchmark as the control and the lean benchmark as the broader probe
 - avoid expanding into too many new side experiments before the writing is stable
