@@ -104,10 +104,18 @@ def build_supported_candidate_slices(
     else:
         raise ValueError(f"unsupported benchmark mode: {benchmark_mode}")
 
-    supported = manifest[
+    homogeneous_supported = manifest[
         manifest["label_status"].isin(supported_statuses)
         & manifest["query_bucket"].eq("supported_candidate")
         & manifest["audited_base_family"].fillna("").astype(str).ne("")
+        & manifest["common_schema"].fillna(False).astype(bool)
+    ].copy()
+
+    heterogeneous_supported = manifest[
+        manifest["label_status"].isin(supported_statuses)
+        & manifest["query_bucket"].eq("heterogeneous")
+        & manifest["audited_base_family"].fillna("").astype(str).ne("")
+        & ~manifest["common_schema"].fillna(False).astype(bool)
     ].copy()
 
     def _apply_floor(frame: pd.DataFrame) -> pd.DataFrame:
@@ -117,12 +125,8 @@ def build_supported_candidate_slices(
         keep = counts[counts >= min_family_size].index
         return frame[frame["audited_base_family"].isin(keep)].copy()
 
-    homogeneous_supported = _apply_floor(
-        supported[supported["common_schema"].fillna(False).astype(bool)].copy()
-    )
-    heterogeneous_supported = _apply_floor(
-        supported[~supported["common_schema"].fillna(False).astype(bool)].copy()
-    )
+    homogeneous_supported = _apply_floor(homogeneous_supported)
+    heterogeneous_supported = _apply_floor(heterogeneous_supported)
     unsupported_special = manifest[manifest["query_bucket"].eq("unsupported_special")].copy()
     unsupported_unknown = manifest[manifest["query_bucket"].eq("unsupported_unknown")].copy()
     return {

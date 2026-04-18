@@ -654,6 +654,8 @@ def _prototype_score(method: str, left: FamilyPrototype, right: FamilyPrototype)
     if method == "summary_module":
         return _negative_l2(left.summary_vector, right.summary_vector)
     if method == "attention_trace":
+        if tuple(left.modules) != tuple(right.modules):
+            return float("nan")
         left_alpha = attention_trace_features(left.full_alpha, list(left.modules))
         right_alpha = attention_trace_features(right.full_alpha, list(right.modules))
         layer_count = min(left_alpha.shape[0], right_alpha.shape[0])
@@ -661,6 +663,8 @@ def _prototype_score(method: str, left: FamilyPrototype, right: FamilyPrototype)
             return float("nan")
         return _negative_l2(left_alpha[:layer_count], right_alpha[:layer_count])
     if method == "full_module_trace":
+        if tuple(left.modules) != tuple(right.modules):
+            return float("nan")
         layer_count = min(left.full_alpha.shape[0], right.full_alpha.shape[0])
         if layer_count <= 0:
             return float("nan")

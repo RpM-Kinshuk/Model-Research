@@ -11,7 +11,12 @@ import numpy as np
 import pandas as pd
 
 from alpha_cluster_dashboard.data import AlphaRecord
-from spectral_research.pipeline import FamilyPrototype, _score_query, write_benchmark_artifacts
+from spectral_research.pipeline import (
+    FamilyPrototype,
+    _prototype_score,
+    _score_query,
+    write_benchmark_artifacts,
+)
 
 
 class PipelineTests(unittest.TestCase):
@@ -92,6 +97,32 @@ class PipelineTests(unittest.TestCase):
         )
 
         self.assertTrue(np.isfinite(score))
+
+    def test_prototype_score_abstains_on_mismatched_full_trace_modules(self) -> None:
+        left = FamilyPrototype(
+            family="fam/left",
+            modules=("self_attn.q_proj", "self_attn.k_proj", "mlp.down_proj"),
+            full_alpha=np.array([[1.0, 2.0, 3.0], [1.5, 2.5, 3.5]], dtype=float),
+            metadata_vector=np.array([1.0], dtype=float),
+            scalar_vector=np.array([1.0], dtype=float),
+            summary_vector=np.array([1.0], dtype=float),
+            architecture=None,
+            size_bucket=None,
+        )
+        right = FamilyPrototype(
+            family="fam/right",
+            modules=("self_attn.q_proj", "mlp.down_proj"),
+            full_alpha=np.array([[1.0, 3.0], [1.5, 3.5]], dtype=float),
+            metadata_vector=np.array([1.0], dtype=float),
+            scalar_vector=np.array([1.0], dtype=float),
+            summary_vector=np.array([1.0], dtype=float),
+            architecture=None,
+            size_bucket=None,
+        )
+
+        score = _prototype_score("full_module_trace", left, right)
+
+        self.assertTrue(np.isnan(score))
 
     def test_pipeline_writes_auditable_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -241,7 +272,7 @@ class PipelineTests(unittest.TestCase):
                     "model_id": f"hetero-{i}",
                     "audited_base_family": "fam/x",
                     "label_status": "provisional",
-                    "query_bucket": "supported_candidate",
+                    "query_bucket": "heterogeneous",
                     "common_schema": False,
                 }
                 for i in range(5)
