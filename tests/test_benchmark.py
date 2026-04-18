@@ -534,6 +534,88 @@ class AuditManifestTests(unittest.TestCase):
         )
         self.assertEqual(heterogeneous["model_id"].tolist(), ["hetero-0"])
 
+    def test_build_mixed_zoo_slices_separates_supported_and_unsupported_slices(self) -> None:
+        from spectral_research.benchmark import build_mixed_zoo_slices
+
+        manifest = pd.DataFrame(
+            [
+                {
+                    "model_id": "base--a",
+                    "audited_base_family": "fam/a",
+                    "label_status": "confirmed",
+                    "query_bucket": "supported_candidate",
+                    "common_schema": True,
+                    "base_model_relation": "finetune",
+                    "bucket_override": "",
+                },
+                {
+                    "model_id": "base--b",
+                    "audited_base_family": "fam/b",
+                    "label_status": "confirmed",
+                    "query_bucket": "supported_candidate",
+                    "common_schema": False,
+                    "base_model_relation": "finetune",
+                    "bucket_override": "",
+                },
+                {
+                    "model_id": "special--c",
+                    "audited_base_family": "",
+                    "label_status": "unknown",
+                    "query_bucket": "unsupported_special",
+                    "common_schema": True,
+                    "base_model_relation": "merge",
+                    "bucket_override": "",
+                },
+                {
+                    "model_id": "unknown--d",
+                    "audited_base_family": "",
+                    "label_status": "unknown",
+                    "query_bucket": "unsupported_unknown",
+                    "common_schema": False,
+                    "base_model_relation": "unknown",
+                    "bucket_override": "",
+                },
+            ]
+        )
+
+        slices = build_mixed_zoo_slices(manifest, min_family_size=1)
+
+        self.assertEqual(slices["homogeneous_supported"]["model_id"].tolist(), ["base--a"])
+        self.assertEqual(slices["heterogeneous_supported"]["model_id"].tolist(), ["base--b"])
+        self.assertEqual(slices["unsupported_special"]["model_id"].tolist(), ["special--c"])
+        self.assertEqual(slices["unsupported_unknown"]["model_id"].tolist(), ["unknown--d"])
+
+    def test_build_mixed_zoo_slices_applies_family_floor_within_each_supported_slice(self) -> None:
+        from spectral_research.benchmark import build_mixed_zoo_slices
+
+        manifest = pd.DataFrame(
+            [
+                {
+                    "model_id": "common--1",
+                    "audited_base_family": "fam/common",
+                    "label_status": "confirmed",
+                    "query_bucket": "supported_candidate",
+                    "common_schema": True,
+                    "base_model_relation": "finetune",
+                    "bucket_override": "",
+                },
+                {
+                    "model_id": "hetero--1",
+                    "audited_base_family": "fam/hetero",
+                    "label_status": "confirmed",
+                    "query_bucket": "supported_candidate",
+                    "common_schema": False,
+                    "base_model_relation": "finetune",
+                    "bucket_override": "",
+                },
+            ]
+        )
+
+        slices = build_mixed_zoo_slices(manifest, min_family_size=2)
+
+        self.assertTrue(slices["homogeneous_supported"].empty)
+        self.assertTrue(slices["heterogeneous_supported"].empty)
+
 
 if __name__ == "__main__":
     unittest.main()

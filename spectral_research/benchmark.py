@@ -151,6 +151,42 @@ def build_audit_manifest(
     ).astype(object)
     manifest["query_bucket"] = manifest["bucket_override"].combine_first(manifest["query_bucket"])
     return manifest.drop(columns=[JOIN_KEY])
+
+
+def build_mixed_zoo_slices(manifest: pd.DataFrame, min_family_size: int) -> dict[str, pd.DataFrame]:
+    frame = manifest.copy()
+    supported = frame[
+        frame["label_status"].eq("confirmed")
+        & frame["query_bucket"].eq("supported_candidate")
+        & frame["audited_base_family"].map(_normalize_text).notna()
+    ].copy()
+
+    homogeneous_supported = supported[supported["common_schema"].fillna(False).astype(bool)].copy()
+    heterogeneous_supported = supported[
+        ~supported["common_schema"].fillna(False).astype(bool)
+    ].copy()
+
+    def _apply_family_floor(slice_frame: pd.DataFrame) -> pd.DataFrame:
+        if slice_frame.empty:
+            return slice_frame
+        family_sizes = slice_frame["audited_base_family"].value_counts()
+        kept_families = family_sizes[family_sizes >= min_family_size].index
+        return slice_frame[slice_frame["audited_base_family"].isin(kept_families)].copy()
+
+    homogeneous_supported = _apply_family_floor(homogeneous_supported)
+    heterogeneous_supported = _apply_family_floor(heterogeneous_supported)
+
+    unsupported_special = frame[frame["query_bucket"].eq("unsupported_special")].copy()
+    unsupported_unknown = frame[frame["query_bucket"].eq("unsupported_unknown")].copy()
+
+    return {
+        "homogeneous_supported": homogeneous_supported.sort_values("model_id").reset_index(drop=True),
+        "heterogeneous_supported": heterogeneous_supported.sort_values("model_id").reset_index(drop=True),
+        "unsupported_special": unsupported_special.sort_values("model_id").reset_index(drop=True),
+        "unsupported_unknown": unsupported_unknown.sort_values("model_id").reset_index(drop=True),
+    }
+
+
 def _empty_split_frame(manifest: pd.DataFrame, *, include_split_role: bool) -> pd.DataFrame:
     columns = list(manifest.columns)
     if include_split_role and "split_role" not in columns:
