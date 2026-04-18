@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+import sys
 
 import numpy as np
 import pandas as pd
@@ -175,6 +177,20 @@ class PipelineTests(unittest.TestCase):
         args = module.parse_args(["--output-dir", "out"])
 
         self.assertEqual(args.output_dir, Path("out"))
+
+    def test_mixed_zoo_retrieval_cli_help_mentions_output_dir(self) -> None:
+        script_path = (
+            Path(__file__).resolve().parents[1] / "scripts" / "mixed_zoo_retrieval_research.py"
+        )
+        result = subprocess.run(
+            [sys.executable, str(script_path), "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("--output-dir", result.stdout)
 
 
 if __name__ == "__main__":
