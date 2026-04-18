@@ -98,6 +98,9 @@ def _group_traces(role_traces: dict[str, np.ndarray], roles: tuple[str, ...]) ->
 def _negative_l2(left: np.ndarray, right: np.ndarray) -> float:
     left_array = np.asarray(left, dtype=float)
     right_array = np.asarray(right, dtype=float)
+    shared_depth = min(left_array.shape[0], right_array.shape[0])
+    left_array = left_array[:shared_depth]
+    right_array = right_array[:shared_depth]
     mask = np.isfinite(left_array) & np.isfinite(right_array)
     if not mask.any():
         return float("nan")

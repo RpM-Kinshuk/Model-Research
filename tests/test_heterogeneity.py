@@ -80,6 +80,22 @@ class HeterogeneityTests(unittest.TestCase):
         self.assertTrue(np.isfinite(score))
         self.assertGreater(score, -1.0)
 
+    def test_shared_role_trace_score_handles_different_layer_counts(self) -> None:
+        query_alpha = np.array([[1.0, 2.0], [2.0, 3.0]])
+        query_modules = ("self_attn.q_proj", "mlp.down_proj")
+        proto_alpha = np.array([[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]])
+        proto_modules = ("self_attn.q_proj", "mlp.down_proj")
+
+        score = shared_role_trace_score(
+            query_alpha=query_alpha,
+            query_modules=query_modules,
+            proto_alpha=proto_alpha,
+            proto_modules=proto_modules,
+            overlap_penalty=0.2,
+        )
+
+        self.assertTrue(np.isfinite(score))
+
     def test_shared_role_trace_score_rejects_alpha_module_width_mismatch(self) -> None:
         query_alpha = np.array([[1.0, 2.0]])
         query_modules = ("self_attn.q_proj",)
@@ -100,6 +116,22 @@ class HeterogeneityTests(unittest.TestCase):
         query_modules = ("self_attn.q_proj", "self_attn.o_proj")
         proto_alpha = np.array([[1.0, 1.5, 3.0], [2.0, 2.5, 4.0]])
         proto_modules = ("self_attn.q_proj", "self_attn.k_proj", "self_attn.o_proj")
+
+        score = role_aggregated_trace_score(
+            query_alpha=query_alpha,
+            query_modules=query_modules,
+            proto_alpha=proto_alpha,
+            proto_modules=proto_modules,
+            overlap_penalty=0.2,
+        )
+
+        self.assertTrue(np.isfinite(score))
+
+    def test_role_aggregated_trace_score_handles_different_layer_counts(self) -> None:
+        query_alpha = np.array([[1.0, 2.0], [2.0, 4.0]])
+        query_modules = ("self_attn.q_proj", "self_attn.o_proj")
+        proto_alpha = np.array([[1.0, 1.5], [2.0, 2.5], [3.0, 3.5]])
+        proto_modules = ("self_attn.q_proj", "self_attn.o_proj")
 
         score = role_aggregated_trace_score(
             query_alpha=query_alpha,
