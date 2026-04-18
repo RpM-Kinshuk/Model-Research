@@ -12,6 +12,11 @@ import pandas as pd
 from alpha_cluster_dashboard.data import AlphaRecord, load_alpha_records, records_to_frame
 from spectral_research.benchmark import build_audit_manifest, build_split_artifacts
 from spectral_research.evaluation import open_set_metrics, retrieval_metrics, risk_coverage_curve
+from spectral_research.heterogeneity import (
+    intrinsic_basics_feature_map,
+    role_aggregated_trace_score,
+    shared_role_trace_score,
+)
 from spectral_research.features import (
     alpha_scalar_features,
     attention_trace_features,
@@ -20,10 +25,12 @@ from spectral_research.features import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_METHODS = (
-    "metadata_only",
+    "intrinsic_basics_only",
     "pl_alpha_scalar",
     "attention_trace",
     "full_module_trace",
+    "shared_role_trace",
+    "role_aggregated_trace",
     "summary_module",
 )
 RETRIEVAL_KS = (1, 3, 5)
@@ -163,30 +170,7 @@ def _audit_seed_frame(manifest: pd.DataFrame) -> pd.DataFrame:
 
 
 def _metadata_feature_map(manifest: pd.DataFrame) -> dict[str, np.ndarray]:
-    if manifest.empty:
-        return {}
-    features = pd.DataFrame({"model_id": manifest["model_id"].astype(str)})
-    features["generation"] = pd.to_numeric(manifest.get("Generation"), errors="coerce").fillna(-1.0)
-    features["params_b"] = pd.to_numeric(manifest.get("#Params (B)"), errors="coerce").fillna(-1.0)
-
-    categorical = pd.DataFrame(
-        {
-            "Architecture": manifest.get("Architecture", pd.Series(index=manifest.index, dtype=object)),
-            "Type": manifest.get("Type", pd.Series(index=manifest.index, dtype=object)),
-            "size_bucket": manifest.get("size_bucket", pd.Series(index=manifest.index, dtype=object)),
-        }
-    ).fillna("unknown")
-    dummies = pd.get_dummies(categorical.astype(str), prefix=["arch", "type", "size"], dtype=float)
-    matrix = pd.concat([features, dummies], axis=1)
-    columns = [column for column in matrix.columns if column != "model_id"]
-    return {
-        row.model_id: row_values
-        for row, row_values in zip(
-            matrix.itertuples(index=False),
-            matrix.loc[:, columns].to_numpy(dtype=float),
-            strict=False,
-        )
-    }
+    return intrinsic_basics_feature_map(manifest)
 
 
 def _record_lookup(records: list[AlphaRecord]) -> dict[str, AlphaRecord]:
@@ -317,7 +301,7 @@ def _score_query(
         if parent_scores is None:
             return float("nan")
         return float(parent_scores["hybrid_lite"].get(prototype.family, float("nan")))
-    if method == "metadata_only":
+    if method in {"intrinsic_basics_only", "metadata_only"}:
         vector = metadata_vectors.get(str(row["model_id"]))
         if vector is None:
             return float("nan")
@@ -333,6 +317,22 @@ def _score_query(
         return _trace_score(record, prototype, attention_only=True)
     if method == "full_module_trace":
         return _trace_score(record, prototype, attention_only=False)
+    if method == "shared_role_trace":
+        return shared_role_trace_score(
+            query_alpha=np.asarray(record.alpha, dtype=float),
+            query_modules=tuple(record.raw_modules),
+            proto_alpha=np.asarray(prototype.full_alpha, dtype=float),
+            proto_modules=tuple(prototype.modules),
+            overlap_penalty=0.2,
+        )
+    if method == "role_aggregated_trace":
+        return role_aggregated_trace_score(
+            query_alpha=np.asarray(record.alpha, dtype=float),
+            query_modules=tuple(record.raw_modules),
+            proto_alpha=np.asarray(prototype.full_alpha, dtype=float),
+            proto_modules=tuple(prototype.modules),
+            overlap_penalty=0.2,
+        )
     raise KeyError(f"Unsupported method: {method}")
 
 
@@ -355,7 +355,7 @@ def _parent_scores_for_query(
     prototypes: dict[str, FamilyPrototype],
     metadata_vectors: dict[str, np.ndarray],
 ) -> dict[str, dict[str, float]]:
-    parent_names = ("metadata_only", "full_module_trace")
+    parent_names = ("intrinsic_basics_only", "full_module_trace")
     parent_scores: dict[str, dict[str, float]] = {}
     for method in parent_names:
         scores = {
@@ -370,7 +370,7 @@ def _parent_scores_for_query(
         }
         parent_scores[method] = scores
 
-    metadata_scaled = _normalize_score_map(parent_scores["metadata_only"])
+    metadata_scaled = _normalize_score_map(parent_scores["intrinsic_basics_only"])
     trace_scaled = _normalize_score_map(parent_scores["full_module_trace"])
     families_with_both = sorted(set(metadata_scaled) & set(trace_scaled))
     parent_scores["hybrid_lite"] = {
@@ -472,7 +472,7 @@ def _calibration_metrics(
 ) -> dict[str, dict[str, object]]:
     calibration = queries_supported[queries_supported["split_role"] == "calibration_supported"].copy()
     output: dict[str, dict[str, object]] = {}
-    for method in ("metadata_only", "full_module_trace", "hybrid_lite"):
+    for method in ("intrinsic_basics_only", "full_module_trace", "hybrid_lite"):
         rankings: list[list[str]] = []
         truths: list[str] = []
         top_scores: list[float] = []
@@ -500,7 +500,7 @@ def _calibration_metrics(
 def _selected_methods(calibration: dict[str, dict[str, object]]) -> tuple[str, ...]:
     methods = list(DEFAULT_METHODS)
     hybrid_metrics = calibration.get("hybrid_lite", {}).get("metrics", {})
-    metadata_metrics = calibration.get("metadata_only", {}).get("metrics", {})
+    metadata_metrics = calibration.get("intrinsic_basics_only", {}).get("metrics", {})
     full_metrics = calibration.get("full_module_trace", {}).get("metrics", {})
     hybrid_mrr = float(hybrid_metrics.get("mrr", float("nan")))
     if (
@@ -647,7 +647,7 @@ def _rejection_outputs(
 
 
 def _prototype_score(method: str, left: FamilyPrototype, right: FamilyPrototype) -> float:
-    if method == "metadata_only":
+    if method in {"intrinsic_basics_only", "metadata_only"}:
         return _negative_l2(left.metadata_vector, right.metadata_vector)
     if method == "pl_alpha_scalar":
         return _negative_l2(left.scalar_vector, right.scalar_vector)
@@ -665,8 +665,24 @@ def _prototype_score(method: str, left: FamilyPrototype, right: FamilyPrototype)
         if layer_count <= 0:
             return float("nan")
         return _negative_l2(left.full_alpha[:layer_count], right.full_alpha[:layer_count])
+    if method == "shared_role_trace":
+        return shared_role_trace_score(
+            query_alpha=np.asarray(left.full_alpha, dtype=float),
+            query_modules=tuple(left.modules),
+            proto_alpha=np.asarray(right.full_alpha, dtype=float),
+            proto_modules=tuple(right.modules),
+            overlap_penalty=0.2,
+        )
+    if method == "role_aggregated_trace":
+        return role_aggregated_trace_score(
+            query_alpha=np.asarray(left.full_alpha, dtype=float),
+            query_modules=tuple(left.modules),
+            proto_alpha=np.asarray(right.full_alpha, dtype=float),
+            proto_modules=tuple(right.modules),
+            overlap_penalty=0.2,
+        )
     if method == "hybrid_lite":
-        metadata = _prototype_score("metadata_only", left, right)
+        metadata = _prototype_score("intrinsic_basics_only", left, right)
         trace = _prototype_score("full_module_trace", left, right)
         if not np.isfinite(metadata) or not np.isfinite(trace):
             return float("nan")
@@ -917,7 +933,7 @@ def run_benchmark(
     queries_unsupported = split_artifacts["queries_unsupported"]
     queries_heterogeneous = split_artifacts["queries_heterogeneous"]
 
-    metadata_vectors = _metadata_feature_map(audited_manifest)
+    metadata_vectors = intrinsic_basics_feature_map(audited_manifest)
     records_by_model_id = _record_lookup(records)
     prototypes = _family_prototypes(gallery_supported, records_by_model_id, metadata_vectors)
     calibration = _calibration_metrics(

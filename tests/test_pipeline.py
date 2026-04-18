@@ -5,12 +5,78 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
-from spectral_research.pipeline import write_benchmark_artifacts
+from alpha_cluster_dashboard.data import AlphaRecord
+from spectral_research.pipeline import FamilyPrototype, _score_query, write_benchmark_artifacts
 
 
 class PipelineTests(unittest.TestCase):
+    def _query_record(self) -> AlphaRecord:
+        return AlphaRecord(
+            model_id="query/a",
+            display_name="query/a",
+            path="/tmp/query-a",
+            num_layers=2,
+            raw_modules=("self_attn.q_proj", "mlp.down_proj"),
+            alpha=np.array([[1.0, 2.0], [2.0, 3.0]], dtype=float),
+        )
+
+    def _prototype(self) -> FamilyPrototype:
+        return FamilyPrototype(
+            family="fam/a",
+            modules=("self_attn.q_proj", "self_attn.k_proj", "mlp.down_proj"),
+            full_alpha=np.array([[1.0, 9.0, 2.0], [2.0, 8.0, 3.0]], dtype=float),
+            metadata_vector=np.array([9.0, 9.0], dtype=float),
+            scalar_vector=np.array([0.0], dtype=float),
+            summary_vector=np.array([0.0], dtype=float),
+            architecture="LlamaForCausalLM",
+            size_bucket="medium",
+        )
+
+    def test_score_query_supports_intrinsic_basics_only(self) -> None:
+        row = pd.Series({"model_id": "query/a"})
+
+        score = _score_query(
+            method="intrinsic_basics_only",
+            row=row,
+            record=None,
+            prototype=self._prototype(),
+            metadata_vectors={"query/a": np.array([1.0, 2.0], dtype=float)},
+            parent_scores=None,
+        )
+
+        self.assertTrue(np.isfinite(score))
+
+    def test_score_query_supports_shared_role_trace(self) -> None:
+        row = pd.Series({"model_id": "query/a"})
+
+        score = _score_query(
+            method="shared_role_trace",
+            row=row,
+            record=self._query_record(),
+            prototype=self._prototype(),
+            metadata_vectors={},
+            parent_scores=None,
+        )
+
+        self.assertTrue(np.isfinite(score))
+
+    def test_score_query_supports_role_aggregated_trace(self) -> None:
+        row = pd.Series({"model_id": "query/a"})
+
+        score = _score_query(
+            method="role_aggregated_trace",
+            row=row,
+            record=self._query_record(),
+            prototype=self._prototype(),
+            metadata_vectors={},
+            parent_scores=None,
+        )
+
+        self.assertTrue(np.isfinite(score))
+
     def test_pipeline_writes_auditable_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             out = Path(tmpdir)
