@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from alpha_cluster_dashboard.data import AlphaRecord, load_alpha_records
+from alpha_cluster_dashboard.data import AlphaRecord, load_alpha_records, schema_name
 from spectral_research.benchmark import build_audit_manifest
 
 PERFORMANCE_TARGETS = ("Average ⬆️", "MMLU-PRO", "MATH Lvl 5")
@@ -54,7 +54,13 @@ def _lookup_targets(leaderboard: pd.DataFrame, key: str) -> pd.DataFrame:
     for column in PERFORMANCE_TARGETS:
         if column not in frame.columns:
             frame[column] = pd.NA
-    return frame.groupby(key, sort=False)[list(PERFORMANCE_TARGETS)].first()
+
+    row_scores = frame.loc[:, list(PERFORMANCE_TARGETS)].notna().sum(axis=1)
+    ordered = frame.assign(_row_score=row_scores, _row_order=range(len(frame))).sort_values(
+        [key, "_row_score", "_row_order"], ascending=[True, False, True], kind="mergesort"
+    )
+    best_rows = ordered.drop_duplicates(subset=[key], keep="first").set_index(key)
+    return best_rows.loc[:, list(PERFORMANCE_TARGETS)]
 
 
 def join_prediction_targets(manifest: pd.DataFrame, leaderboard: pd.DataFrame) -> pd.DataFrame:
@@ -102,7 +108,7 @@ def _records_frame(records: list[AlphaRecord]) -> pd.DataFrame:
                 "raw_module_count": record.raw_module_count,
                 "raw_modules": ", ".join(record.raw_modules),
                 "common_schema": record.common_schema,
-                "schema_name": f"schema_{record.raw_module_count}",
+                "schema_name": schema_name(record),
             }
             for record in records
         ]
