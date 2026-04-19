@@ -482,6 +482,27 @@ Interpretation:
 
 So prediction should stay as an active side direction, but not as a headline claim yet.
 
+## Performance Prediction Cycle 2
+
+We then ran one Cycle 2 follow-up with the kept optimized mode `cpu_cache_only` and added `schema_routed_trace`.
+
+Cycle 2 outputs:
+
+- [prediction_dataset.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_prediction_cycle2/prediction_dataset.csv)
+- [prediction_results.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_prediction_cycle2/prediction_results.csv)
+- [oof_predictions.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_prediction_cycle2/oof_predictions.csv)
+- [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_prediction_cycle2/report.md)
+
+Interpretation stayed centered on `MMLU-PRO` and `MATH Lvl 5`.
+`Average ⬆️` stayed only a sanity target.
+
+Compared with Cycle 1, the heterogeneous slice changed only partially:
+
+- `MATH Lvl 5`, heterogeneous: the best row improved from `role_aggregated_trace` raw `k=3` unweighted, R² `-0.640`, Spearman `0.464`, to `schema_routed_trace` raw `k=5` unweighted, R² `-0.255`, Spearman `0.488`
+- `MMLU-PRO`, heterogeneous: `schema_routed_trace` did **not** beat the Cycle 1 `full_module_trace` best row; the best routed row reached R² `-0.796`, Spearman `0.121`, versus Cycle 1 `full_module_trace` at R² `-0.649`, Spearman `0.630`
+- on the stronger `supported_candidate` and `unsupported_special` slices for `MMLU-PRO` and `MATH Lvl 5`, `full_module_trace` stayed best in Cycle 2, so the routed method did not produce a clear regression there
+- outside the main emphasis, `schema_routed_trace` did become the best `MMLU-PRO` row on `unsupported_unknown`, improving the best R² from `0.584` in Cycle 1 to `0.602` in Cycle 2
+
 ## What We Can Claim Now
 
 We can claim this:
