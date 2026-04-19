@@ -505,15 +505,17 @@ Compared with Cycle 1, the heterogeneous slice changed only partially:
 
 ## Performance Trend Diagnostics
 
-Outputs: [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/report.md), [absolute_trend_dataset.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/absolute_trend_dataset.csv), [exact_parent_delta_dataset.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/exact_parent_delta_dataset.csv), [family_relative_delta_dataset.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/family_relative_delta_dataset.csv), [trend_results.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/trend_results.csv).
+Outputs: [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/report.md), [trend_results.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/trend_results.csv), [absolute_trend_dataset.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/absolute_trend_dataset.csv), [exact_parent_delta_dataset.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/exact_parent_delta_dataset.csv), [family_relative_delta_dataset.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/family_relative_delta_dataset.csv).
 
-The strongest absolute-trend row was `MATH Lvl 5` on the heterogeneous slice with `trend_global_mean` under structural control (`R² 0.401`, `Spearman 0.177`, `n=21`); `MMLU-PRO` peaked lower at `R² 0.284`.
+`structural_adjusted` means adjusted/partial Spearman against the structural controls.
 
-Exact-parent deltas had some clean support; the strongest all-scored row reached `R² 0.183` on `Average ⬆️_delta` with `trend_global_end_delta` under structural control (`n=71`), but the main `MMLU-PRO` and `MATH Lvl 5` exact-parent rows stayed weak, so they are not yet a stable signal.
+The strongest absolute-trend row is still a small heterogeneous slice: `MMLU-PRO` with `trend_global_end_minus_start` under raw Spearman (`0.503`, `n=21`), while the adjusted absolute rows are smaller and the slice is thin.
 
-Family-relative deltas were broader, but the effect is still noisy: the best all-scored rows reached only modest `R²` values around `0.17` to `0.21`, and the heterogeneous slice remained small and unstable.
+Exact-parent support is present but mostly small-sample: the strongest row is heterogeneous `MATH Lvl 5_delta` on `trend_global_mean_delta` (`-0.876`, `n=12`), and the broader all-scored exact-parent rows are much weaker.
 
-Trend-style signals are worth carrying forward only as a secondary feature family; the absolute-trend rows look modestly useful, but the delta-style rows are not strong enough yet to drive later prediction work.
+Family-relative support is broader but still noisy: the strongest rows are heterogeneous `Average ⬆️_delta` on `trend_global_end_minus_start_delta` (`-0.728`, `n=18`) and `trend_global_start_delta` (`0.690`, `n=18`).
+
+Trend-style signals should stay only as a secondary feature family. The rerun is coherent enough to keep them in the background, but not strong enough to move them ahead of the zoo-management-first focus.
 
 ## What We Can Claim Now
 
