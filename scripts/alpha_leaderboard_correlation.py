@@ -61,7 +61,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=REPO_ROOT / "archive" / "correlation_runs" / "alpha_leaderboard",
+        default=REPO_ROOT / "research_runs" / "legacy" / "alpha_leaderboard",
         help="Directory where CSV and markdown outputs will be written",
     )
     parser.add_argument(
