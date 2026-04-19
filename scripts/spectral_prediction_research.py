@@ -24,6 +24,15 @@ SUPPORTED_METHODS = (
     "full_module_trace",
     "role_aggregated_trace",
 )
+RESULT_COLUMNS = ["target", "method", "mode", "bucket", "k", "weighted", "n", "r2", "mae", "spearman"]
+OOF_COLUMNS = ["model_id", "query_bucket", "prediction", "mode", "target", "method", "k", "weighted"]
+
+
+def _cv_splits_arg(value: str) -> int:
+    parsed = int(value)
+    if parsed < 2:
+        raise argparse.ArgumentTypeError("--cv-splits must be at least 2")
+    return parsed
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -66,7 +75,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--cv-splits",
-        type=int,
+        type=_cv_splits_arg,
         default=5,
         help="Grouped CV splits.",
     )
@@ -102,6 +111,19 @@ def _markdown_table(frame: pd.DataFrame, columns: list[str]) -> str:
 
 
 def render_report(results: pd.DataFrame) -> str:
+    if results.empty:
+        return "\n".join(
+            [
+                "# Performance Prediction Cycle 1",
+                "",
+                "## Best rows by target",
+                "_No rows._",
+                "",
+                "## Notes",
+                "- No prediction rows were generated for the requested dataset/targets.",
+            ]
+        ) + "\n"
+
     best = (
         results.sort_values(["target", "r2", "spearman"], ascending=[True, False, False])
         .groupby("target", as_index=False)
@@ -188,9 +210,20 @@ def _spectral_rows(
     return oof_frames, result_frames
 
 
+def _empty_results_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=RESULT_COLUMNS)
+
+
+def _empty_oof_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=OOF_COLUMNS)
+
+
 def main() -> None:
     args = parse_args()
     targets = _split_csv(args.targets)
+    if not targets:
+        raise SystemExit("No prediction targets specified.")
+
     dataset, records_by_model_id = build_prediction_dataset(
         metrics_dir=args.metrics_dir,
         leaderboard_csv=args.leaderboard_csv,
@@ -227,8 +260,22 @@ def main() -> None:
             oof_frames.extend(target_oof)
             result_frames.extend(target_results)
 
-    results = pd.concat(result_frames, ignore_index=True)
-    predictions = pd.concat(oof_frames, ignore_index=True)
+    results = (
+        pd.concat(result_frames, ignore_index=True)
+        if result_frames
+        else _empty_results_frame()
+    )
+    if results.empty:
+        results = _empty_results_frame()
+
+    predictions = (
+        pd.concat(oof_frames, ignore_index=True)
+        if oof_frames
+        else _empty_oof_frame()
+    )
+    if predictions.empty:
+        predictions = _empty_oof_frame()
+
     results.to_csv(args.output_dir / "prediction_results.csv", index=False)
     predictions.to_csv(args.output_dir / "oof_predictions.csv", index=False)
     (args.output_dir / "report.md").write_text(render_report(results), encoding="utf-8")

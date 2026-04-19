@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+import tempfile
 import unittest
 import warnings
-from unittest.mock import patch
+from argparse import Namespace
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -383,7 +385,7 @@ class PredictionModelTests(unittest.TestCase):
 
 
 class PredictionCliTests(unittest.TestCase):
-    def test_prediction_cli_accepts_freeze_csv_targets_and_output_dir(self) -> None:
+    def _load_module(self):
         script_path = (
             Path(__file__).resolve().parents[1] / "scripts" / "spectral_prediction_research.py"
         )
@@ -394,6 +396,10 @@ class PredictionCliTests(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         assert spec.loader is not None
         spec.loader.exec_module(module)
+        return module
+
+    def test_prediction_cli_accepts_freeze_csv_targets_and_output_dir(self) -> None:
+        module = self._load_module()
 
         args = module.parse_args(
             [
@@ -411,16 +417,7 @@ class PredictionCliTests(unittest.TestCase):
         self.assertEqual(args.output_dir, Path("out"))
 
     def test_render_report_includes_best_rows_table_and_notes(self) -> None:
-        script_path = (
-            Path(__file__).resolve().parents[1] / "scripts" / "spectral_prediction_research.py"
-        )
-        spec = importlib.util.spec_from_file_location("spectral_prediction_research_cli", script_path)
-
-        self.assertIsNotNone(spec)
-        self.assertIsNotNone(spec.loader)
-        module = importlib.util.module_from_spec(spec)
-        assert spec.loader is not None
-        spec.loader.exec_module(module)
+        module = self._load_module()
 
         results = pd.DataFrame(
             [
@@ -469,3 +466,58 @@ class PredictionCliTests(unittest.TestCase):
         self.assertIn("## Best rows by target", report)
         self.assertIn("role_aggregated_trace", report)
         self.assertIn("- Raw spectral rows measure direct neighborhood signal.", report)
+
+    def test_prediction_cli_rejects_invalid_cv_splits(self) -> None:
+        module = self._load_module()
+
+        with self.assertRaises(SystemExit):
+            module.parse_args(["--cv-splits", "1"])
+
+    def test_main_rejects_blank_targets_cleanly(self) -> None:
+        module = self._load_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = Namespace(
+                metrics_dir=Path("metrics"),
+                leaderboard_csv=Path("leaderboard.csv"),
+                lineage_csv=Path("lineage.csv"),
+                freeze_csv=Path("freeze.csv"),
+                output_dir=Path(tmpdir),
+                targets=" , ",
+                cv_splits=5,
+            )
+            with patch.object(module, "parse_args", return_value=args):
+                with self.assertRaisesRegex(SystemExit, "No prediction targets specified"):
+                    module.main()
+
+    def test_main_writes_stable_outputs_for_empty_dataset(self) -> None:
+        module = self._load_module()
+
+        empty_dataset = pd.DataFrame(
+            columns=["model_id", "query_bucket", "Average ⬆️", "MMLU-PRO", "MATH Lvl 5"]
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            args = Namespace(
+                metrics_dir=Path("metrics"),
+                leaderboard_csv=Path("leaderboard.csv"),
+                lineage_csv=Path("lineage.csv"),
+                freeze_csv=Path("freeze.csv"),
+                output_dir=output_dir,
+                targets="Average ⬆️,MMLU-PRO",
+                cv_splits=5,
+            )
+            with patch.object(module, "parse_args", return_value=args), patch.object(
+                module,
+                "build_prediction_dataset",
+                return_value=(empty_dataset, {}),
+            ):
+                module.main()
+
+            self.assertTrue((output_dir / "prediction_dataset.csv").exists())
+            self.assertTrue((output_dir / "prediction_results.csv").exists())
+            self.assertTrue((output_dir / "oof_predictions.csv").exists())
+            report = (output_dir / "report.md").read_text(encoding="utf-8")
+            self.assertIn("# Performance Prediction Cycle 1", report)
+            self.assertIn("_No rows._", report)
