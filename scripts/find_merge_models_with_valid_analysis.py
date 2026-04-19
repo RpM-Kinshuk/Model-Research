@@ -35,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-csv",
         type=Path,
-        default=REPO_ROOT / "merge_models_with_valid_analysis.csv",
+        default=REPO_ROOT / "research_runs" / "legacy" / "merge_models_with_valid_analysis.csv",
         help="Path to the output CSV",
     )
     return parser.parse_args()

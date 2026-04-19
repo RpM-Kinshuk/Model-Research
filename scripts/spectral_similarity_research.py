@@ -26,7 +26,19 @@ def parse_args(argv: list[str] | None = None):
 
 
 def main(argv: list[str] | None = None) -> int:
-    return pipeline_main(argv)
+    output_dir_flag = "--output-dir"
+    has_explicit_output_dir = argv is not None and any(
+        arg == output_dir_flag or arg.startswith(f"{output_dir_flag}=") for arg in argv
+    )
+    if has_explicit_output_dir:
+        return pipeline_main(argv)
+    return pipeline_main(
+        (argv or [])
+        + [
+            "--output-dir",
+            str(REPO_ROOT / "research_runs" / "legacy" / "spectral_similarity_research"),
+        ]
+    )
 
 
 if __name__ == "__main__":
