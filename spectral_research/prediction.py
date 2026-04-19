@@ -9,6 +9,11 @@ from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.model_selection import GroupKFold
 
+try:
+    import torch
+except ImportError:  # pragma: no cover - optional dependency for the optimized cache path
+    torch = None
+
 from alpha_cluster_dashboard.data import AlphaRecord, load_alpha_records, schema_name
 from spectral_research.benchmark import build_audit_manifest
 from spectral_research.features import alpha_scalar_features
@@ -104,6 +109,35 @@ def _negative_l2(left: np.ndarray, right: np.ndarray) -> float:
     return float(-np.mean(delta * delta))
 
 
+def _torch_resolve_device(device: str) -> str:
+    if torch is None:
+        raise NotImplementedError("Torch is not available")
+    resolved = torch.device(device)
+    if resolved.type == "cuda" and not torch.cuda.is_available():
+        return "cpu"
+    return str(resolved)
+
+
+def _pairwise_negative_l2_torch(feature_rows: np.ndarray, *, device: str) -> np.ndarray:
+    if torch is None:
+        raise NotImplementedError("Torch is not available")
+
+    tensor = torch.as_tensor(feature_rows, dtype=torch.float64, device=_torch_resolve_device(device))
+    finite = torch.isfinite(tensor)
+    left = tensor[:, None, :]
+    right = tensor[None, :, :]
+    pairwise_mask = finite[:, None, :] & finite[None, :, :]
+    squared = torch.where(pairwise_mask, (left - right) * (left - right), torch.zeros_like(left))
+    counts = pairwise_mask.sum(dim=-1)
+    scores = -(squared.sum(dim=-1) / counts.clamp_min(1))
+    scores = scores.masked_fill(counts == 0, float("nan"))
+    return scores.cpu().numpy()
+
+
+def _can_use_torch_pairwise_backend(method: str) -> bool:
+    return method == "pl_alpha_scalar"
+
+
 def _cv_groups(frame: pd.DataFrame) -> np.ndarray:
     if "cv_group" in frame.columns:
         groups = frame["cv_group"]
@@ -180,12 +214,33 @@ def build_pairwise_score_matrix(
     *,
     method: str = "pl_alpha_scalar",
     backend: str = "cpu",
+    device: str = "cpu",
 ) -> tuple[np.ndarray, dict[str, int]]:
-    if backend != "cpu":
-        raise NotImplementedError("Only the CPU pairwise score matrix backend is supported")
-
     model_ids = [str(model_id) for model_id in frame["model_id"]]
     model_index = {model_id: index for index, model_id in enumerate(model_ids)}
+    if backend == "torch":
+        if not _can_use_torch_pairwise_backend(method):
+            raise NotImplementedError(f"Torch pairwise backend is not supported for {method}")
+        feature_rows = []
+        valid_indices = []
+        for index, model_id in enumerate(model_ids):
+            record = records_by_model_id.get(model_id)
+            if record is None:
+                continue
+            feature_rows.append(alpha_scalar_features(record.alpha).reshape(-1))
+            valid_indices.append(index)
+
+        matrix = np.full((len(model_ids), len(model_ids)), np.nan, dtype=float)
+        if feature_rows:
+            scores = _pairwise_negative_l2_torch(np.asarray(feature_rows, dtype=float), device=device)
+            for left_position, left_index in enumerate(valid_indices):
+                for right_position, right_index in enumerate(valid_indices):
+                    matrix[left_index, right_index] = scores[left_position, right_position]
+        return matrix, model_index
+
+    if backend != "cpu":
+        raise NotImplementedError("Only the CPU and torch pairwise score matrix backends are supported")
+
     matrix = np.full((len(model_ids), len(model_ids)), np.nan, dtype=float)
     structural_vectors = structural_basics_feature_map(frame)
 

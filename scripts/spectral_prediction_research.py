@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 from spectral_research.prediction import (
     PERFORMANCE_TARGETS,
     build_prediction_dataset,
+    build_pairwise_score_matrix,
     neighborhood_predict_oof,
     structural_baseline_oof,
     summarize_predictions,
@@ -32,6 +33,14 @@ def _cv_splits_arg(value: str) -> int:
     if parsed < 2:
         raise argparse.ArgumentTypeError("--cv-splits must be at least 2")
     return parsed
+
+
+def _optimization_mode_arg(value: str) -> str:
+    if value not in {"repeated_cpu", "cpu_cache_only", "cache_plus_gpu0"}:
+        raise argparse.ArgumentTypeError(
+            "--optimization-mode must be one of repeated_cpu, cpu_cache_only, cache_plus_gpu0"
+        )
+    return value
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -77,6 +86,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=_cv_splits_arg,
         default=5,
         help="Grouped CV splits.",
+    )
+    parser.add_argument(
+        "--optimization-mode",
+        type=_optimization_mode_arg,
+        default="repeated_cpu",
+        help="Prediction cache strategy.",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda:0",
+        help="Device to use for torch pairwise cache precompute.",
     )
     return parser.parse_args(argv)
 
@@ -166,6 +187,34 @@ def _baseline_rows(dataset: pd.DataFrame, *, target: str, cv_splits: int) -> tup
     return baseline, summary
 
 
+def _pairwise_cache_backend(method: str, *, optimization_mode: str, device: str) -> tuple[str, str]:
+    if optimization_mode == "cache_plus_gpu0" and method == "pl_alpha_scalar":
+        return "torch", device
+    return "cpu", "cpu"
+
+
+def _build_pairwise_cache(
+    dataset: pd.DataFrame,
+    records_by_model_id: dict[str, object],
+    *,
+    method: str,
+    optimization_mode: str,
+    device: str,
+) -> tuple[object, object]:
+    backend, backend_device = _pairwise_cache_backend(
+        method,
+        optimization_mode=optimization_mode,
+        device=device,
+    )
+    return build_pairwise_score_matrix(
+        dataset,
+        records_by_model_id,
+        method=method,
+        backend=backend,
+        device=backend_device,
+    )
+
+
 def _spectral_rows(
     dataset: pd.DataFrame,
     records_by_model_id: dict[str, object],
@@ -173,6 +222,9 @@ def _spectral_rows(
     target: str,
     method: str,
     cv_splits: int,
+    pairwise_scores: object | None = None,
+    model_index: dict[str, int] | None = None,
+    baseline_by_model_id: dict[str, float] | None = None,
 ) -> tuple[list[pd.DataFrame], list[pd.DataFrame]]:
     oof_frames: list[pd.DataFrame] = []
     result_frames: list[pd.DataFrame] = []
@@ -188,6 +240,9 @@ def _spectral_rows(
                     k=k,
                     weighted=weighted,
                     residualize=residualize,
+                    pairwise_scores=pairwise_scores,
+                    model_index=model_index,
+                    baseline_by_model_id=baseline_by_model_id,
                     cv_splits=cv_splits,
                 ).assign(
                     target=target,
@@ -220,6 +275,8 @@ def _empty_oof_frame(targets: list[str]) -> pd.DataFrame:
 
 def main() -> None:
     args = parse_args()
+    optimization_mode = getattr(args, "optimization_mode", "repeated_cpu")
+    device = getattr(args, "device", "cuda:0")
     targets = _split_csv(args.targets)
     if not targets:
         raise SystemExit("No prediction targets specified.")
@@ -238,6 +295,17 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     dataset.to_csv(args.output_dir / "prediction_dataset.csv", index=False)
 
+    pairwise_cache: dict[str, tuple[object, object]] = {}
+    if optimization_mode != "repeated_cpu":
+        for method in SUPPORTED_METHODS[1:]:
+            pairwise_cache[method] = _build_pairwise_cache(
+                dataset,
+                records_by_model_id,
+                method=method,
+                optimization_mode=optimization_mode,
+                device=device,
+            )
+
     result_frames: list[pd.DataFrame] = []
     oof_frames: list[pd.DataFrame] = []
     for target in targets:
@@ -249,13 +317,26 @@ def main() -> None:
         oof_frames.append(baseline_oof)
         result_frames.append(baseline_summary)
 
+        baseline_by_model_id = {
+            str(model_id): float(prediction)
+            for model_id, prediction in zip(
+                baseline_oof["model_id"],
+                baseline_oof["prediction"],
+                strict=False,
+            )
+        }
+
         for method in SUPPORTED_METHODS[1:]:
+            cached_pairwise = pairwise_cache.get(method)
             target_oof, target_results = _spectral_rows(
                 dataset,
                 records_by_model_id,
                 target=target,
                 method=method,
                 cv_splits=args.cv_splits,
+                pairwise_scores=cached_pairwise[0] if cached_pairwise is not None else None,
+                model_index=cached_pairwise[1] if cached_pairwise is not None else None,
+                baseline_by_model_id=baseline_by_model_id,
             )
             oof_frames.extend(target_oof)
             result_frames.extend(target_results)

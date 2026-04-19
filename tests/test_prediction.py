@@ -385,7 +385,7 @@ class PredictionModelTests(unittest.TestCase):
         self.assertTrue(np.isnan(float(summary.iloc[0]["spearman"])))
 
 
-class PredictionOptimizationTests(unittest.TestCase):
+class PredictionOptimizationModeTests(unittest.TestCase):
     def _records(self) -> dict[str, AlphaRecord]:
         return {
             "m1": AlphaRecord(
@@ -497,6 +497,24 @@ class PredictionOptimizationTests(unittest.TestCase):
         self.assertTrue(np.allclose(matrix, matrix.T, equal_nan=True))
         self.assertEqual(model_index["m1"], 0)
         self.assertEqual(model_index["m4"], 3)
+
+    def test_build_pairwise_score_matrix_torch_backend_matches_cpu_backend(self) -> None:
+        cpu_matrix, cpu_index = build_pairwise_score_matrix(
+            self._frame(),
+            self._records(),
+            method="pl_alpha_scalar",
+            backend="cpu",
+        )
+        torch_matrix, torch_index = build_pairwise_score_matrix(
+            self._frame(),
+            self._records(),
+            method="pl_alpha_scalar",
+            backend="torch",
+            device="cpu",
+        )
+
+        self.assertEqual(cpu_index, torch_index)
+        np.testing.assert_allclose(torch_matrix, cpu_matrix, rtol=0.0, atol=0.0, equal_nan=True)
 
     def test_cached_neighborhood_predict_oof_matches_uncached_path(self) -> None:
         frame = self._frame()
@@ -759,6 +777,21 @@ class PredictionCliTests(unittest.TestCase):
         self.assertEqual(args.freeze_csv, Path("freeze.csv"))
         self.assertEqual(args.targets, "Average ⬆️,MMLU-PRO,MATH Lvl 5")
         self.assertEqual(args.output_dir, Path("out"))
+
+    def test_prediction_cli_accepts_optimization_mode_and_device(self) -> None:
+        module = self._load_module()
+
+        args = module.parse_args(
+            [
+                "--optimization-mode",
+                "cache_plus_gpu0",
+                "--device",
+                "cuda:0",
+            ]
+        )
+
+        self.assertEqual(args.optimization_mode, "cache_plus_gpu0")
+        self.assertEqual(args.device, "cuda:0")
 
     def test_render_report_includes_best_rows_table_and_notes(self) -> None:
         module = self._load_module()
