@@ -412,6 +412,67 @@ Interpretation:
 - the current best heterogeneity-capable method is `role_aggregated_trace`
 - the strict benchmark should now be treated as the clean control, while the lean benchmark is the broader mixed-zoo probe
 
+## Performance Prediction Cycle 1
+
+We then ran one small performance-prediction pilot on the current joined scored subset.
+
+Pilot outputs:
+
+- [prediction_dataset.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_prediction_cycle1/prediction_dataset.csv)
+- [prediction_results.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_prediction_cycle1/prediction_results.csv)
+- [oof_predictions.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_prediction_cycle1/oof_predictions.csv)
+- [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_prediction_cycle1/report.md)
+
+The prediction dataset had:
+
+- `374` scored models
+- `257` grouped CV units
+- query buckets: `41` supported-candidate, `97` unsupported-special, `215` unsupported-unknown, `21` heterogeneous
+- targets: `Average ⬆️`, `MMLU-PRO`, `MATH Lvl 5`
+
+The strongest rows all came from raw neighborhood prediction on the richer spectral traces.
+
+Best observed rows:
+
+- `Average ⬆️`, `unsupported_special`
+  - `full_module_trace`, raw, `k=5`, weighted
+  - R² `0.703`, MAE `2.933`, Spearman `0.820`
+  - structural baseline on the same slice: R² `-0.024`, Spearman `0.074`
+- `MMLU-PRO`, `supported_candidate`
+  - `full_module_trace`, raw, `k=3`, weighted
+  - R² `0.831`, MAE `3.209`, Spearman `0.894`
+  - structural baseline on the same slice: R² `0.354`, Spearman `0.351`
+- `MMLU-PRO`, `unsupported_special`
+  - `full_module_trace`, raw, `k=5`, weighted
+  - R² `0.806`, MAE `2.590`, Spearman `0.872`
+  - structural baseline on the same slice: R² `0.172`, Spearman `0.158`
+- `MATH Lvl 5`, `unsupported_special`
+  - `full_module_trace`, raw, `k=5`, weighted
+  - R² `0.779`, MAE `4.544`, Spearman `0.848`
+  - structural baseline on the same slice: R² `-0.100`, Spearman `-0.013`
+- `MATH Lvl 5`, `unsupported_unknown`
+  - `role_aggregated_trace`, raw, `k=5`, unweighted
+  - R² `0.480`, MAE `5.279`, Spearman `0.760`
+  - structural baseline on the same slice: R² `-0.241`, Spearman `-0.255`
+
+Overall pattern:
+
+- `full_module_trace` produced the best row in `7 / 12` target-bucket slices
+- `role_aggregated_trace` produced the best row in the other `5 / 12`
+- raw spectral prediction produced the best row in `10 / 12` slices
+- structurally controlled spectral prediction produced the best row in only `2 / 12` slices
+- `pl_alpha_scalar` never produced the best row
+
+Interpretation:
+
+- the current representation does carry real predictive signal
+- that signal is strong enough to beat the structural baseline by a large margin on several slices
+- the strongest current method family is still the richer trace representation, not the scalar summary
+- but this is **not** a solved or uniform result
+- the heterogeneous slice is still weak: best R² stayed negative on all three targets (`Average ⬆️`: `-0.664`, `MMLU-PRO`: `-0.649`, `MATH Lvl 5`: `-0.640`)
+
+So prediction should stay as an active side direction, but not as a headline claim yet.
+
 ## What We Can Claim Now
 
 We can claim this:
