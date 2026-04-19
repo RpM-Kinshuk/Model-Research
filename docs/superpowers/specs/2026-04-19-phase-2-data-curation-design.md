@@ -15,6 +15,7 @@ Phase 2 should produce:
 - a data layer that plugs directly into the existing experiment family
 
 This phase is about **data curation and data shape**, not about inventing new retrieval or prediction methods.
+It also does **not** include the later batch spectral-analysis runner.
 
 ## Why This Phase Exists
 
@@ -88,6 +89,7 @@ Phase 2 does not include:
 - introducing a new benchmark contract for methods
 - changing the meaning of the current preliminary findings
 - building a large new supervised prediction stack
+- implementing or revisiting the batch analysis runner
 
 ## Target Dataset Shape
 
@@ -100,14 +102,14 @@ Phase 2 should distinguish two levels clearly:
    - target size: about `15,000`
 
 2. `analysis-ready zoo`
-   - the subset of the candidate zoo that has already been successfully processed and is ready for experiments
+   - the subset of the candidate zoo that has already been processed in a later phase and is ready for experiments
 
 Between those two, phase 2 should also track a lighter state:
 
 - `fetchable`
   - models that appear accessible and analyzable based on lightweight Hub checks, without a full persistent download
 
-This split is important because the current failure pattern is not just sampling error. A large share of missing analysis rows appear to still exist publicly and should be recoverable, but curation cannot keep all of them downloaded locally.
+This split is important because the current failure pattern is not just sampling error. A large share of missing analysis rows appear to still exist publicly and should be recoverable, but curation cannot keep all of them downloaded locally and does not handle the later analysis pass itself.
 
 ### Lineage Balance
 
@@ -263,7 +265,7 @@ Phase 2 should use four source layers.
 
 3. `existing local spectral analysis outputs`
    - `svd_results/`
-   - current analysis-ready subset and artifact paths
+   - current already-processed subset and artifact paths
 
 4. `live Hugging Face and leaderboard enrichment`
    - Hugging Face Hub API
@@ -275,7 +277,7 @@ The existing data should be ingested first. Live collection should then extend a
 
 Phase 2 curation should not perform full persistent downloads of model weights.
 
-Instead, it should use lightweight Hub checks to estimate whether a model is likely analyzable later by the batch analysis runner.
+Instead, it should use lightweight Hub checks to estimate whether a model is likely fetchable and structurally analyzable later.
 
 Recommended lightweight checks:
 
@@ -295,7 +297,7 @@ The curation outcome should be:
 - `public but structurally incomplete`
 - `public but probe failed`
 
-This is enough for curation. The full download should remain part of the later spectral-analysis runner, which can keep the current behavior of downloading a few models in parallel, analyzing them, recording outputs, and deleting local weights afterward.
+This is enough for curation. The full download-and-analysis process belongs to a later phase and is intentionally out of scope here.
 
 ## Collection Pipeline
 
@@ -342,19 +344,15 @@ Enrich rows from:
 
 This stage should not decide sampling by itself. It should add information to already selected candidates.
 
-### Stage 5: Recovery and Fetch
+### Stage 5: Recovery Preflight
 
-Attempt to recover analysis-ready coverage using explicit status tracking.
+Attempt to improve future analysis coverage using explicit status tracking.
 
-This stage should be split conceptually into:
+This stage should use:
 
-1. `preflight recovery`
-   - lightweight Hub/API probes only
-   - no persistent full-weight download
-
-2. `analysis runner handoff`
-   - batch download, analyze, and delete
-   - record success or failure back into the canonical table
+- lightweight Hub/API probes only
+- no persistent full-weight download
+- no direct execution of the later analysis runner
 
 Track failures as classes such as:
 
@@ -367,6 +365,7 @@ Track failures as classes such as:
 - `analysis_failed`
 
 Public models that fail should stay in the canonical table and remain eligible for retry.
+The purpose here is to improve future analysis readiness, not to perform the analysis phase now.
 
 ### Stage 6: Derived Views
 
@@ -440,7 +439,7 @@ Phase 2 is successful if it produces:
 3. explicit availability, fetchability, and recovery status per model
 4. better representation of adjacent categories without letting them dominate
 5. better eval enrichment for downstream prediction work
-6. a clean handoff into the same experiment family used in phase 1
+6. a clean handoff into the same experiment family used in phase 1 once later phases run
 
 ## Non-Goals
 
