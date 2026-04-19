@@ -122,6 +122,16 @@ Prediction rule:
 - for each held-out model, find nearest training neighbors
 - predict the target as a weighted or unweighted average of neighbor target values
 
+Run this in two modes:
+
+- `raw spectral neighborhood`
+  - use the neighborhood method by itself
+- `spectral + structural control`
+  - add a small structural correction on top of the neighborhood prediction, or evaluate a residualized target after regressing out the structural baseline first
+
+The exact implementation can stay simple.
+The point is just to measure the spectral methods both with and without structural controls.
+
 Keep this simple.
 Only test a very small set of neighborhood rules, for example:
 
@@ -163,6 +173,9 @@ Primary metrics:
 Report:
 
 - overall results by target
+- separate reporting for:
+  - raw spectral prediction
+  - structurally controlled spectral prediction
 - bucket breakdowns for:
   - `supported_candidate`
   - `heterogeneous`
@@ -177,7 +190,8 @@ Cycle 1 is successful if it answers these:
 
 1. Does spectral neighborhood prediction beat the structural control?
 2. Does `role_aggregated_trace` help on the broader heterogeneous or unsupported buckets?
-3. Is there any target where the zoo representation carries useful predictive signal at all?
+3. Does the spectral signal still help after structural controls are accounted for?
+4. Is there any target where the zoo representation carries useful predictive signal at all?
 
 ## Keep / Kill Rules
 
