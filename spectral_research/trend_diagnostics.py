@@ -334,6 +334,20 @@ def _bucket_composition_note(bucket_counts: dict[str, int] | None) -> str:
     )
 
 
+def _trend_report_notes(bucket_counts: dict[str, int] | None) -> list[str]:
+    return [
+        "- Rows are selected by absolute Spearman magnitude within each bucket/target pair, so negative associations can appear when their magnitude is larger.",
+        "- `family_relative` anchors are family medians over all scored rows for that family, not bucket-local medians.",
+        "- `structural_adjusted` means partial Spearman adjusted for `num_layers`, `raw_module_count`, `common_schema`, and schema dummies.",
+        "- This branch is descriptive-only, not predictive.",
+        "- `supported_candidate` is the primary managed slice and should be read first.",
+        "- `heterogeneous` is the broader cross-zoo context slice.",
+        _bucket_composition_note(bucket_counts),
+        "- Exact-parent and family-relative evidence are reported separately on purpose.",
+        "- Raw and lightweight structural-adjusted variants are both included when enough rows are available.",
+    ]
+
+
 def render_trend_report(
     results: pd.DataFrame,
     *,
@@ -344,21 +358,17 @@ def render_trend_report(
             [
                 "# Performance Trend Diagnostics",
                 "",
-                "## Top Absolute-Trend Rows By Target And Bucket",
+                "## Largest-Magnitude Absolute-Trend Rows By Target And Bucket",
                 "_No rows._",
                 "",
-                "## Top Exact-Parent Rows By Target And Bucket",
+                "## Largest-Magnitude Exact-Parent Rows By Target And Bucket",
                 "_No rows._",
                 "",
-                "## Top Family-Relative Rows By Target And Bucket",
+                "## Largest-Magnitude Family-Relative Rows By Target And Bucket",
                 "_No rows._",
                 "",
                 "## Notes",
-                "- `supported_candidate` is the primary managed slice and should be read first.",
-                "- `heterogeneous` is the broader cross-zoo context slice.",
-                _bucket_composition_note(bucket_counts),
-                "- Exact-parent and family-relative evidence are reported separately on purpose.",
-                "- Raw and lightweight structural-adjusted variants are both included when enough rows are available.",
+                *_trend_report_notes(bucket_counts),
             ]
         ) + "\n"
 
@@ -387,29 +397,25 @@ def render_trend_report(
         [
             "# Performance Trend Diagnostics",
             "",
-            "## Top Absolute-Trend Rows By Target And Bucket",
+            "## Largest-Magnitude Absolute-Trend Rows By Target And Bucket",
             _markdown_table(
                 best_rows("absolute"),
                 ["bucket", "target", "feature", "control_mode", "n", "spearman"],
             ),
             "",
-            "## Top Exact-Parent Rows By Target And Bucket",
+            "## Largest-Magnitude Exact-Parent Rows By Target And Bucket",
             _markdown_table(
                 best_rows("exact_parent"),
                 ["bucket", "target", "feature", "control_mode", "n", "spearman"],
             ),
             "",
-            "## Top Family-Relative Rows By Target And Bucket",
+            "## Largest-Magnitude Family-Relative Rows By Target And Bucket",
             _markdown_table(
                 best_rows("family_relative"),
                 ["bucket", "target", "feature", "control_mode", "n", "spearman"],
             ),
             "",
             "## Notes",
-            "- `supported_candidate` is the primary managed slice and should be read first.",
-            "- `heterogeneous` is the broader cross-zoo context slice.",
-            _bucket_composition_note(bucket_counts),
-            "- Exact-parent and family-relative evidence are reported separately on purpose.",
-            "- Raw and lightweight structural-adjusted variants are both included when enough rows are available.",
+            *_trend_report_notes(bucket_counts),
         ]
     ) + "\n"

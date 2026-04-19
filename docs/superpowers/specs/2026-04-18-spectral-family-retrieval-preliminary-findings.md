@@ -508,6 +508,7 @@ Compared with Cycle 1, the heterogeneous slice changed only partially:
 Outputs: [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/report.md), [trend_results.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/trend_results.csv), [absolute_trend_dataset.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/absolute_trend_dataset.csv), [exact_parent_delta_dataset.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/exact_parent_delta_dataset.csv), [family_relative_delta_dataset.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/family_relative_delta_dataset.csv).
 
 `structural_adjusted` means adjusted/partial Spearman against the structural controls.
+Family-relative anchors are computed over all scored family members, so managed-slice family-relative rows are not fully bucket-local. This branch is descriptive-only.
 
 The managed `supported_candidate` slice should be read first. It now shows the clearest absolute-trend associations: structural-adjusted `trend_global_mean` vs `Average ⬆️` (`0.604`, `n=41`), plus `trend_global_start` vs `MMLU-PRO` (`0.646`, `n=41`) and `MATH Lvl 5` (`0.649`, `n=41`).
 

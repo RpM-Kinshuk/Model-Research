@@ -471,9 +471,9 @@ class TrendDiagnosticsAnalysisTests(unittest.TestCase):
         report = render_trend_report(rows)
 
         self.assertIn("# Performance Trend Diagnostics", report)
-        self.assertIn("## Top Absolute-Trend Rows By Target And Bucket", report)
-        self.assertIn("## Top Exact-Parent Rows By Target And Bucket", report)
-        self.assertIn("## Top Family-Relative Rows By Target And Bucket", report)
+        self.assertIn("## Largest-Magnitude Absolute-Trend Rows By Target And Bucket", report)
+        self.assertIn("## Largest-Magnitude Exact-Parent Rows By Target And Bucket", report)
+        self.assertIn("## Largest-Magnitude Family-Relative Rows By Target And Bucket", report)
         self.assertIn("| bucket | target | feature | control_mode | n | spearman |", report)
         self.assertIn("| supported_candidate | MMLU-PRO | trend_global_end_minus_start | structural_adjusted | 18 | 0.600 |", report)
         self.assertIn("| heterogeneous | MMLU-PRO | trend_global_end_minus_start | raw | 5 | 0.700 |", report)
@@ -487,6 +487,10 @@ class TrendDiagnosticsAnalysisTests(unittest.TestCase):
             report.index("| heterogeneous | MMLU-PRO | trend_global_end_minus_start | raw | 5 | 0.700 |"),
             report.index("| all_scored | MMLU-PRO | trend_global_end_minus_start | raw | 120 | 0.500 |"),
         )
+        self.assertIn("Rows are selected by absolute Spearman magnitude", report)
+        self.assertIn("family_relative` anchors are family medians over all scored rows", report)
+        self.assertIn("structural_adjusted` means partial Spearman adjusted for `num_layers`, `raw_module_count`, `common_schema`, and schema dummies", report)
+        self.assertIn("This branch is descriptive-only, not predictive.", report)
         self.assertIn("mixed-zoo aggregate", report)
         self.assertNotIn("r2", report)
         self.assertNotIn("mae", report)
