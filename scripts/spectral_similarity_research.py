@@ -7,7 +7,22 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from spectral_research.pipeline import main as pipeline_main, parse_args
+from spectral_research.pipeline import main as pipeline_main, parse_args as pipeline_parse_args
+
+
+def parse_args(argv: list[str] | None = None):
+    args = pipeline_parse_args(argv)
+    if args.lineage_csv == REPO_ROOT / "data" / "sampled_metadata.csv":
+        args.lineage_csv = REPO_ROOT / "data" / "sampled_metadata.csv"
+    if args.output_dir == (
+        REPO_ROOT
+        / "research_runs"
+        / "preliminary"
+        / "retrieval"
+        / "spectral_family_retrieval_strict_headline_v2"
+    ):
+        args.output_dir = REPO_ROOT / "research_runs" / "legacy" / "spectral_similarity_research"
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -90,13 +105,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--lineage-csv",
         type=Path,
-        default=REPO_ROOT / "sampled_metadata.csv",
+        default=REPO_ROOT / "data" / "sampled_metadata.csv",
         help="Path to sampled_metadata.csv with lineage annotations.",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=REPO_ROOT / "research_runs" / "spectral_similarity_research",
+        default=REPO_ROOT / "research_runs" / "legacy" / "spectral_similarity_research",
         help="Directory where CSV and Markdown outputs will be written.",
     )
     parser.add_argument(

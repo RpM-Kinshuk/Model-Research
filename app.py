@@ -259,7 +259,7 @@ def main() -> None:
 
     default_metrics_dir = str(Path("svd_results") / "metrics")
     metrics_dir = st.sidebar.text_input("Metrics directory", value=default_metrics_dir)
-    lineage_path = st.sidebar.text_input("Lineage metadata CSV", value="sampled_metadata.csv")
+    lineage_path = st.sidebar.text_input("Lineage metadata CSV", value="data/sampled_metadata.csv")
 
     if not Path(metrics_dir).exists():
         st.error(f"Metrics directory not found: {metrics_dir}")
