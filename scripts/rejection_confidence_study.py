@@ -56,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("research_runs/rejection_confidence_study_strict_v1"),
+        default=Path("research_runs/preliminary/rejection/rejection_confidence_study_strict_v1"),
     )
     parser.add_argument("--min-family-size", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)

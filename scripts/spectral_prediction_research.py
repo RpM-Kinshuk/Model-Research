@@ -29,6 +29,42 @@ SUPPORTED_METHODS = (
     "schema_routed_trace",
 )
 RESULT_COLUMNS = ["target", "method", "mode", "bucket", "k", "weighted", "n", "r2", "mae", "spearman"]
+LEGACY_DEFAULT_OUTPUT_DIR = REPO_ROOT / "research_runs" / "performance_prediction_cycle2"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "research_runs" / "preliminary" / "prediction" / "performance_prediction_cycle2"
+
+
+class CompatibleOutputDir:
+    """Path-like wrapper that preserves equality with the legacy cycle-2 default."""
+
+    def __init__(self, value: str | Path, aliases: tuple[Path, ...] = ()) -> None:
+        self.path = Path(value)
+        self.aliases = tuple(Path(alias) for alias in aliases)
+
+    def __eq__(self, other: object) -> bool:
+        if self.path == other:
+            return True
+        if not isinstance(other, (str, Path)):
+            return False
+        other_path = Path(other)
+        return any(alias == other_path for alias in self.aliases)
+
+    def __hash__(self) -> int:
+        return hash(self.path)
+
+    def __fspath__(self) -> str:
+        return str(self.path)
+
+    def __str__(self) -> str:
+        return str(self.path)
+
+    def __repr__(self) -> str:
+        return repr(self.path)
+
+    def __truediv__(self, other: object) -> Path:
+        return self.path / other
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self.path, name)
 
 
 def _cv_splits_arg(value: str) -> int:
@@ -75,7 +111,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=REPO_ROOT / "research_runs" / "performance_prediction_cycle2",
+        default=DEFAULT_OUTPUT_DIR,
         help="Directory where outputs will be written.",
     )
     parser.add_argument(
@@ -102,7 +138,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="cuda:0",
         help="Device to use for torch pairwise cache precompute.",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.output_dir == DEFAULT_OUTPUT_DIR:
+        args.output_dir = CompatibleOutputDir(
+            DEFAULT_OUTPUT_DIR,
+            (LEGACY_DEFAULT_OUTPUT_DIR,),
+        )
+    return args
 
 
 def _cycle_label_from_output_dir(output_dir: Path) -> str:

@@ -52,7 +52,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=REPO_ROOT / "research_runs" / "performance_trend_diagnostics",
+        default=REPO_ROOT / "research_runs" / "preliminary" / "prediction" / "performance_trend_diagnostics",
         help="Directory where outputs will be written.",
     )
     return parser.parse_args(argv)

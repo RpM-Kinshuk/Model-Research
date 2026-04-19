@@ -53,6 +53,12 @@ SUPPORTED_SLICES = ("all_supported", "homogeneous_supported", "heterogeneous_sup
 SUPPORTED_SOURCE_SLICES = ("homogeneous_supported", "heterogeneous_supported")
 CALIBRATION_FRACTION = 0.25
 DEFAULT_SEED = 0
+STRICT_DEFAULT_OUTPUT_DIR = (
+    REPO_ROOT / "research_runs" / "preliminary" / "retrieval" / "mixed_zoo_retrieval_cycle1"
+)
+LEAN_DEFAULT_OUTPUT_DIR = (
+    REPO_ROOT / "research_runs" / "preliminary" / "retrieval" / "lean_mixed_zoo_benchmark"
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -76,7 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=REPO_ROOT / "research_runs" / "mixed_zoo_retrieval_cycle1",
+        default=None,
     )
     parser.add_argument(
         "--benchmark-mode",
@@ -88,7 +94,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    return build_parser().parse_args(argv)
+    args = build_parser().parse_args(argv)
+    if args.output_dir is None:
+        args.output_dir = (
+            LEAN_DEFAULT_OUTPUT_DIR if args.benchmark_mode == "lean" else STRICT_DEFAULT_OUTPUT_DIR
+        )
+    return args
 
 
 def build_supported_candidate_slices(

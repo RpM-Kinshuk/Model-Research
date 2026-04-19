@@ -1,27 +1,27 @@
 # Model Research
 
-This repository contains the active preliminary research pipeline for organizing a mixed zoo of models using spectral structure, plus preserved legacy material from earlier phases.
+This repository contains the current phase-1 preliminary research pipeline for organizing a mixed zoo of models with spectral structure. The active codepaths, scripts, and saved outputs now follow the grouped `research_runs/preliminary/...` layout.
 
 ## Start here
 
-- Current preliminary narrative: `docs/research/preliminary/`
+- Reader-facing research summary: `docs/research/preliminary/`
 - Active package: `spectral_research/`
-- Active scripts: `scripts/`
-- Active artifacts: `research_runs/`
-- Legacy material is still in the current root-level directories for now and will be moved under `archive/` during this cleanup.
+- Active data/loading utilities: `alpha_cluster_dashboard/`
+- Canonical experiment entrypoints: `scripts/`
+- Saved experiment outputs: `research_runs/preliminary/`
 
 ## Active areas
 
-- `spectral_research/`: retrieval, prediction, rejection, heterogeneity, and trend analysis logic
-- `alpha_cluster_dashboard/`: active data/loading utilities still used by the research pipeline
-- `scripts/`: runnable experiment entrypoints
-- `data/`: sampled and manually audited metadata inputs
-- `svd_results/`: spectral metric sources
-- `tests/`: regression and unit tests
-- `research_runs/`: saved experiment outputs
+- `spectral_research/`: retrieval, prediction, rejection, heterogeneity, evaluation, and trend analysis logic
+- `alpha_cluster_dashboard/`: data loading and shared dashboard-facing helpers still used by the active pipeline
+- `scripts/`: canonical experiment CLIs plus preserved exploratory helpers
+- `data/`: sampled metadata, leaderboard inputs, and manual audit freezes
+- `svd_results/`: spectral metric sources consumed by the experiments
+- `tests/`: unit and regression coverage for the active research code
+- `research_runs/preliminary/`: grouped preliminary retrieval, rejection, and prediction outputs
 
 ## Notes
 
-- `docs/superpowers/` contains design and planning history.
-- `docs/research/preliminary/` is the reader-facing summary of the current preliminary phase.
-- Old materials are being consolidated out of the root as part of this cleanup.
+- `docs/research/preliminary/` is the current narrative for the preliminary phase.
+- `docs/superpowers/` contains internal design and planning history.
+- Some older helper scripts remain in `scripts/`, but the current supported experiment surface is documented in `scripts/README.md`.

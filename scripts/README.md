@@ -1,24 +1,32 @@
-# Active Scripts
+# Scripts
 
-These are the active experiment entrypoints for the current preliminary phase.
+This directory keeps both the current canonical experiment CLIs and a small set of preserved exploratory helpers. If you are running the active preliminary pipeline, start with the canonical entrypoints below.
 
-## Retrieval
+## Canonical current entrypoints
 
-- `spectral_similarity_research.py`
-- `mixed_zoo_retrieval_research.py`
+### Retrieval
+
 - `spectral_family_retrieval_cli.py`
+  - Default output: `research_runs/preliminary/retrieval/spectral_family_retrieval`
+- `mixed_zoo_retrieval_research.py`
+  - Strict default output: `research_runs/preliminary/retrieval/mixed_zoo_retrieval_cycle1`
+  - Lean default output when `--output-dir` is omitted: `research_runs/preliminary/retrieval/lean_mixed_zoo_benchmark`
 
-## Rejection
+### Rejection
 
 - `rejection_confidence_study.py`
+  - Default output: `research_runs/preliminary/rejection/rejection_confidence_study_strict_v1`
 
-## Prediction
+### Prediction
 
 - `spectral_prediction_research.py`
+  - Default output: `research_runs/preliminary/prediction/performance_prediction_cycle2`
 - `performance_trend_diagnostics.py`
+  - Default output: `research_runs/preliminary/prediction/performance_trend_diagnostics`
 
-## Older exploratory scripts still kept
+## Preserved exploratory or legacy helpers
 
+- `spectral_similarity_research.py`
 - `alpha_leaderboard_correlation.py`
 - `alpha_near_two_hypothesis_check.py`
 - `common_schema_performance_research.py`
