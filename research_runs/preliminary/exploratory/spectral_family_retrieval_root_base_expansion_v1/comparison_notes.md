@@ -1,8 +1,8 @@
 # Min-5 Expansion Comparison Notes
 
-- Baseline run: `research_runs/spectral_family_retrieval_strict_headline_v2`
-- Threshold-only sensitivity run: `research_runs/spectral_family_retrieval_strict_headline_min5_v1`
-- Derived-freeze expansion run: `research_runs/spectral_family_retrieval_root_base_expansion_v1`
+- Baseline run: `research_runs/preliminary/retrieval/spectral_family_retrieval_strict_headline_v2`
+- Threshold-only sensitivity run: `research_runs/preliminary/exploratory/spectral_family_retrieval_strict_headline_min5_v1`
+- Derived-freeze expansion run: `research_runs/preliminary/exploratory/spectral_family_retrieval_root_base_expansion_v1`
 - Decision question: does relaxing the support bar and promoting a few near-miss official base families add useful benchmark coverage without materially weakening retrieval quality?
 
 ## Record

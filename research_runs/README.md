@@ -19,5 +19,6 @@ Preserved helper chains that still write historical-style outputs should use `re
 - `research_runs/legacy/alpha_leaderboard/`
 - `research_runs/legacy/common_schema_performance_research/`
 - `research_runs/legacy/alpha_near_two_check/`
+- `research_runs/legacy/spectral_similarity_research/`
 
 The old flat layout has been retired for current preliminary work, but these legacy compatibility paths remain available for preserved helper workflows.

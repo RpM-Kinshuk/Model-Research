@@ -1,8 +1,8 @@
 # Strict Metadata Backfill Comparison Notes
 
-- Baseline run: `research_runs/spectral_family_retrieval_strict_headline_v2`
-- Backfill run: `research_runs/spectral_family_retrieval_strict_metadata_backfill_v1`
-- Backfill source: `research_runs/spectral_family_retrieval/strict_metadata_backfill_leaderboard_v1.csv`
+- Baseline run: `research_runs/preliminary/retrieval/spectral_family_retrieval_strict_headline_v2`
+- Backfill run: `research_runs/preliminary/retrieval/spectral_family_retrieval_strict_metadata_backfill_v1`
+- Backfill source: `research_runs/preliminary/retrieval/spectral_family_retrieval/strict_metadata_backfill_leaderboard_v1.csv`
 
 ## What Changed
 
