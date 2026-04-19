@@ -6,6 +6,8 @@ This directory keeps both the current canonical experiment CLIs and a small set 
 
 ### Retrieval
 
+- `spectral_similarity_research.py`
+  - Strict default output: `research_runs/preliminary/retrieval/spectral_family_retrieval_strict_headline_v2`
 - `mixed_zoo_retrieval_research.py`
   - Strict default output: `research_runs/preliminary/retrieval/mixed_zoo_retrieval_cycle1`
   - Lean default output when `--output-dir` is omitted: `research_runs/preliminary/retrieval/lean_mixed_zoo_benchmark`
@@ -24,7 +26,6 @@ This directory keeps both the current canonical experiment CLIs and a small set 
 
 ## Preserved exploratory or legacy helpers
 
-- `spectral_similarity_research.py`
 - `alpha_leaderboard_correlation.py`
 - `alpha_near_two_hypothesis_check.py`
 - `common_schema_performance_research.py`

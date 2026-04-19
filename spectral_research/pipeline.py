@@ -96,7 +96,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=REPO_ROOT / "research_runs" / "preliminary" / "retrieval" / "spectral_family_retrieval",
+        default=REPO_ROOT
+        / "research_runs"
+        / "preliminary"
+        / "retrieval"
+        / "spectral_family_retrieval_strict_headline_v2",
     )
     parser.add_argument("--min-family-size", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
