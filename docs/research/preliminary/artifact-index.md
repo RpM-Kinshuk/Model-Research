@@ -15,6 +15,9 @@ This file lists the canonical artifacts for the preliminary phase.
 - `research_runs/preliminary/retrieval/`
 - `research_runs/preliminary/rejection/`
 - `research_runs/preliminary/prediction/`
+
+## Supporting artifact roots
+
 - `research_runs/preliminary/optimization/`
 - `research_runs/preliminary/exploratory/`
 

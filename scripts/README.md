@@ -1,8 +1,8 @@
 # Scripts
 
-This directory keeps both the current canonical experiment CLIs and a small set of preserved exploratory helpers. If you are running the active preliminary pipeline, start with the canonical entrypoints below.
+This directory keeps the supported current entrypoints for the active preliminary workflows, plus a small set of preserved exploratory helpers. Some of these entrypoints write support or intermediate runs; the canonical artifact set is defined in `docs/research/preliminary/`.
 
-## Canonical current entrypoints
+## Supported current entrypoints
 
 ### Retrieval
 
@@ -16,13 +16,16 @@ This directory keeps both the current canonical experiment CLIs and a small set 
 
 - `rejection_confidence_study.py`
   - Default output: `research_runs/preliminary/rejection/rejection_confidence_study_strict_v1`
+  - Canonical artifact root: `research_runs/preliminary/rejection/`
 
 ### Prediction
 
 - `spectral_prediction_research.py`
   - Default output: `research_runs/preliminary/prediction/performance_prediction_cycle2`
+  - Canonical artifact root: `research_runs/preliminary/prediction/`
 - `performance_trend_diagnostics.py`
   - Default output: `research_runs/preliminary/prediction/performance_trend_diagnostics`
+  - Support or intermediate diagnostics under the prediction area
 
 ## Preserved exploratory or legacy helpers
 

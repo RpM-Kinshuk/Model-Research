@@ -17,10 +17,13 @@ Out-of-scope for this phase:
 
 ## Grouped Artifact Layout
 
-The preliminary runs are organized by purpose under these canonical roots:
+The preliminary runs are organized by purpose under these canonical roots and support areas:
 
 - `research_runs/preliminary/retrieval/`
 - `research_runs/preliminary/rejection/`
 - `research_runs/preliminary/prediction/`
+
+Support areas:
+
 - `research_runs/preliminary/optimization/`
 - `research_runs/preliminary/exploratory/`
