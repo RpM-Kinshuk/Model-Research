@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 import sys
 
@@ -46,7 +47,7 @@ def _optimization_mode_arg(value: str) -> str:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run performance prediction cycle 1.")
+    parser = argparse.ArgumentParser(description="Run performance prediction.")
     parser.add_argument(
         "--metrics-dir",
         type=Path,
@@ -74,7 +75,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=REPO_ROOT / "research_runs" / "performance_prediction_cycle1",
+        default=REPO_ROOT / "research_runs" / "performance_prediction_cycle2",
         help="Directory where outputs will be written.",
     )
     parser.add_argument(
@@ -102,6 +103,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Device to use for torch pairwise cache precompute.",
     )
     return parser.parse_args(argv)
+
+
+def _cycle_label_from_output_dir(output_dir: Path) -> str:
+    for part in reversed(output_dir.parts):
+        match = re.search(r"cycle[_-]?(\d+)", part, flags=re.IGNORECASE)
+        if match is not None:
+            return f"Cycle {match.group(1)}"
+    return ""
 
 
 def _split_csv(value: str) -> list[str]:
@@ -132,11 +141,15 @@ def _markdown_table(frame: pd.DataFrame, columns: list[str]) -> str:
     return "\n".join([header, separator, *rows])
 
 
-def render_report(results: pd.DataFrame) -> str:
+def render_report(results: pd.DataFrame, *, cycle_label: str) -> str:
+    title = "# Performance Prediction"
+    if cycle_label:
+        title = f"{title} {cycle_label}"
+
     if results.empty:
         return "\n".join(
             [
-                "# Performance Prediction Cycle 1",
+                title,
                 "",
                 "## Best rows by target",
                 "_No rows._",
@@ -154,7 +167,7 @@ def render_report(results: pd.DataFrame) -> str:
     )
     return "\n".join(
         [
-            "# Performance Prediction Cycle 1",
+            title,
             "",
             "## Best rows by target",
             _markdown_table(
@@ -283,6 +296,7 @@ def main() -> None:
     args = parse_args()
     optimization_mode = getattr(args, "optimization_mode", "repeated_cpu")
     device = getattr(args, "device", "cuda:0")
+    cycle_label = _cycle_label_from_output_dir(args.output_dir)
     targets = _split_csv(args.targets)
     if not targets:
         raise SystemExit("No prediction targets specified.")
@@ -363,7 +377,10 @@ def main() -> None:
 
     results.to_csv(args.output_dir / "prediction_results.csv", index=False)
     predictions.to_csv(args.output_dir / "oof_predictions.csv", index=False)
-    (args.output_dir / "report.md").write_text(render_report(results), encoding="utf-8")
+    (args.output_dir / "report.md").write_text(
+        render_report(results, cycle_label=cycle_label),
+        encoding="utf-8",
+    )
 
     print(f"Outputs written to: {args.output_dir}")
 

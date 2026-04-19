@@ -913,6 +913,16 @@ class PredictionCliTests(unittest.TestCase):
         self.assertEqual(args.targets, "Average ⬆️,MMLU-PRO,MATH Lvl 5")
         self.assertEqual(args.output_dir, Path("out"))
 
+    def test_prediction_cli_defaults_output_dir_to_cycle2(self) -> None:
+        module = self._load_module()
+
+        args = module.parse_args([])
+
+        self.assertEqual(
+            args.output_dir,
+            module.REPO_ROOT / "research_runs" / "performance_prediction_cycle2",
+        )
+
     def test_prediction_cli_accepts_optimization_mode_and_device(self) -> None:
         module = self._load_module()
 
@@ -972,9 +982,9 @@ class PredictionCliTests(unittest.TestCase):
             ]
         )
 
-        report = module.render_report(results)
+        report = module.render_report(results, cycle_label="Cycle 2")
 
-        self.assertIn("# Performance Prediction Cycle 1", report)
+        self.assertIn("# Performance Prediction Cycle 2", report)
         self.assertIn("## Best rows by target", report)
         self.assertIn("role_aggregated_trace", report)
         self.assertIn("- Raw spectral rows measure direct neighborhood signal.", report)
@@ -1010,7 +1020,7 @@ class PredictionCliTests(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            output_dir = Path(tmpdir)
+            output_dir = Path(tmpdir) / "performance_prediction_cycle2"
             args = Namespace(
                 metrics_dir=Path("metrics"),
                 leaderboard_csv=Path("leaderboard.csv"),
@@ -1039,7 +1049,7 @@ class PredictionCliTests(unittest.TestCase):
             )
             self.assertEqual(len(oof_predictions), 0)
             report = (output_dir / "report.md").read_text(encoding="utf-8")
-            self.assertIn("# Performance Prediction Cycle 1", report)
+            self.assertIn("# Performance Prediction Cycle 2", report)
             self.assertIn("_No rows._", report)
 
 
