@@ -518,6 +518,14 @@ class PredictionCliTests(unittest.TestCase):
             self.assertTrue((output_dir / "prediction_dataset.csv").exists())
             self.assertTrue((output_dir / "prediction_results.csv").exists())
             self.assertTrue((output_dir / "oof_predictions.csv").exists())
+            oof_predictions = pd.read_csv(output_dir / "oof_predictions.csv")
+            self.assertIn("Average ⬆️", oof_predictions.columns)
+            self.assertIn("MMLU-PRO", oof_predictions.columns)
+            self.assertEqual(
+                [column for column in oof_predictions.columns if column not in {"Average ⬆️", "MMLU-PRO"}],
+                ["model_id", "query_bucket", "prediction", "mode", "target", "method", "k", "weighted"],
+            )
+            self.assertEqual(len(oof_predictions), 0)
             report = (output_dir / "report.md").read_text(encoding="utf-8")
             self.assertIn("# Performance Prediction Cycle 1", report)
             self.assertIn("_No rows._", report)

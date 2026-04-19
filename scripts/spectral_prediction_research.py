@@ -25,7 +25,6 @@ SUPPORTED_METHODS = (
     "role_aggregated_trace",
 )
 RESULT_COLUMNS = ["target", "method", "mode", "bucket", "k", "weighted", "n", "r2", "mae", "spearman"]
-OOF_COLUMNS = ["model_id", "query_bucket", "prediction", "mode", "target", "method", "k", "weighted"]
 
 
 def _cv_splits_arg(value: str) -> int:
@@ -214,8 +213,9 @@ def _empty_results_frame() -> pd.DataFrame:
     return pd.DataFrame(columns=RESULT_COLUMNS)
 
 
-def _empty_oof_frame() -> pd.DataFrame:
-    return pd.DataFrame(columns=OOF_COLUMNS)
+def _empty_oof_frame(targets: list[str]) -> pd.DataFrame:
+    columns = ["model_id", "query_bucket", *targets, "prediction", "mode", "target", "method", "k", "weighted"]
+    return pd.DataFrame(columns=list(dict.fromkeys(columns)))
 
 
 def main() -> None:
@@ -271,10 +271,8 @@ def main() -> None:
     predictions = (
         pd.concat(oof_frames, ignore_index=True)
         if oof_frames
-        else _empty_oof_frame()
+        else _empty_oof_frame(targets)
     )
-    if predictions.empty:
-        predictions = _empty_oof_frame()
 
     results.to_csv(args.output_dir / "prediction_results.csv", index=False)
     predictions.to_csv(args.output_dir / "oof_predictions.csv", index=False)
