@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 
 from alpha_cluster_dashboard.data import AlphaRecord
+import scripts.performance_trend_diagnostics as performance_trend_diagnostics
 from spectral_research.trend_diagnostics import (
     build_absolute_trend_frame,
     build_exact_parent_delta_frame,
@@ -180,7 +183,8 @@ class TrendDiagnosticsTableTests(unittest.TestCase):
         self.assertEqual(len(delta_frame), 1)
         row = delta_frame.iloc[0]
         self.assertEqual(row["model_id"], "repo--child-a")
-        self.assertEqual(row["parent_model_id"], "repo/parent-a")
+        self.assertEqual(row["source_model"], "repo/parent-a")
+        self.assertEqual(row["parent_model_id"], "repo--parent-a")
         self.assertAlmostEqual(float(row["MMLU-PRO_delta"]), 5.0)
         self.assertAlmostEqual(float(row["trend_global_mean_delta"]), 1.5)
 
@@ -322,7 +326,7 @@ class TrendDiagnosticsTableTests(unittest.TestCase):
 
 
 class TrendDiagnosticsAnalysisTests(unittest.TestCase):
-    def test_analyze_trend_rows_returns_spearman_and_r2(self) -> None:
+    def test_analyze_trend_rows_returns_descriptive_spearman_only(self) -> None:
         frame = pd.DataFrame(
             {
                 "model_id": ["a", "b", "c", "d"],
@@ -356,7 +360,44 @@ class TrendDiagnosticsAnalysisTests(unittest.TestCase):
         self.assertEqual(row["bucket"], "all_scored")
         self.assertEqual(row["feature"], "trend_global_end_minus_start")
         self.assertAlmostEqual(float(row["spearman"]), 1.0)
-        self.assertGreater(float(row["r2"]), 0.90)
+        self.assertEqual(
+            list(results.columns),
+            ["analysis", "bucket", "target", "feature", "control_mode", "n", "spearman"],
+        )
+
+    def test_analyze_trend_rows_structural_adjusted_spearman_residualizes_controls(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "model_id": [f"model-{index}" for index in range(8)],
+                "query_bucket": ["supported_candidate"] * 8,
+                "trend_global_end_minus_start": [0.9, 1.1, 1.9, 2.1, 2.9, 3.1, 3.9, 4.1],
+                "MMLU-PRO": [1.1, 0.9, 2.1, 1.9, 3.1, 2.9, 4.1, 3.9],
+                "num_layers": [1, 1, 2, 2, 3, 3, 4, 4],
+                "raw_module_count": [10, 10, 20, 20, 30, 30, 40, 40],
+                "common_schema": [True] * 8,
+                "schema_name": ["common"] * 8,
+            }
+        )
+
+        raw = analyze_trend_rows(
+            frame,
+            feature_columns=["trend_global_end_minus_start"],
+            target_columns=["MMLU-PRO"],
+            analysis_name="absolute",
+            bucket_name="all_scored",
+            use_structural_controls=False,
+        )
+        adjusted = analyze_trend_rows(
+            frame,
+            feature_columns=["trend_global_end_minus_start"],
+            target_columns=["MMLU-PRO"],
+            analysis_name="absolute",
+            bucket_name="all_scored",
+            use_structural_controls=True,
+        )
+
+        self.assertGreater(float(raw.iloc[0]["spearman"]), 0.8)
+        self.assertLess(float(adjusted.iloc[0]["spearman"]), -0.8)
 
     def test_render_trend_report_includes_three_sections(self) -> None:
         rows = pd.DataFrame(
@@ -369,8 +410,6 @@ class TrendDiagnosticsAnalysisTests(unittest.TestCase):
                     "control_mode": "raw",
                     "n": 12,
                     "spearman": 0.5,
-                    "r2": 0.2,
-                    "mae": 1.1,
                 },
                 {
                     "analysis": "exact_parent",
@@ -380,8 +419,6 @@ class TrendDiagnosticsAnalysisTests(unittest.TestCase):
                     "control_mode": "raw",
                     "n": 7,
                     "spearman": 0.4,
-                    "r2": 0.1,
-                    "mae": 1.2,
                 },
                 {
                     "analysis": "family_relative",
@@ -391,8 +428,6 @@ class TrendDiagnosticsAnalysisTests(unittest.TestCase):
                     "control_mode": "raw",
                     "n": 9,
                     "spearman": 0.3,
-                    "r2": 0.05,
-                    "mae": 1.3,
                 },
             ]
         )
@@ -403,3 +438,144 @@ class TrendDiagnosticsAnalysisTests(unittest.TestCase):
         self.assertIn("## Top Absolute-Trend Rows By Target", report)
         self.assertIn("## Top Exact-Parent Rows By Target", report)
         self.assertIn("## Top Family-Relative Rows By Target", report)
+        self.assertIn("| bucket | target | feature | control_mode | n | spearman |", report)
+        self.assertNotIn("r2", report)
+        self.assertNotIn("mae", report)
+
+
+class PerformanceTrendDiagnosticsCliTests(unittest.TestCase):
+    def test_main_writes_descriptive_outputs_with_canonical_parent_ids(self) -> None:
+        dataset = pd.DataFrame(
+            [
+                {
+                    "model_id": "repo--parent-a",
+                    "display_name": "repo/parent-a",
+                    "source_model": "",
+                    "base_model_relation": "",
+                    "audited_base_family": "fam/a",
+                    "candidate_family": "fam/a",
+                    "query_bucket": "supported_candidate",
+                    "common_schema": True,
+                    "schema_name": "common_llm_7",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "Average ⬆️": 10.0,
+                    "MMLU-PRO": 11.0,
+                    "MATH Lvl 5": 12.0,
+                },
+                {
+                    "model_id": "repo--child-a",
+                    "display_name": "repo/child-a",
+                    "source_model": "repo/parent-a",
+                    "base_model_relation": "finetune",
+                    "audited_base_family": "fam/a",
+                    "candidate_family": "fam/a",
+                    "query_bucket": "supported_candidate",
+                    "common_schema": True,
+                    "schema_name": "common_llm_7",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "Average ⬆️": 15.0,
+                    "MMLU-PRO": 16.0,
+                    "MATH Lvl 5": 20.0,
+                },
+                {
+                    "model_id": "peer-b",
+                    "display_name": "repo/peer-b",
+                    "source_model": "",
+                    "base_model_relation": "",
+                    "audited_base_family": "fam/a",
+                    "candidate_family": "fam/a",
+                    "query_bucket": "heterogeneous",
+                    "common_schema": False,
+                    "schema_name": "bert_like_5",
+                    "num_layers": 3,
+                    "raw_module_count": 3,
+                    "Average ⬆️": 7.0,
+                    "MMLU-PRO": 8.0,
+                    "MATH Lvl 5": 6.0,
+                },
+                {
+                    "model_id": "peer-c",
+                    "display_name": "repo/peer-c",
+                    "source_model": "",
+                    "base_model_relation": "",
+                    "audited_base_family": "fam/b",
+                    "candidate_family": "fam/b",
+                    "query_bucket": "heterogeneous",
+                    "common_schema": False,
+                    "schema_name": "bert_like_5",
+                    "num_layers": 4,
+                    "raw_module_count": 4,
+                    "Average ⬆️": 9.0,
+                    "MMLU-PRO": 10.0,
+                    "MATH Lvl 5": 11.0,
+                },
+            ]
+        )
+        records = {
+            "repo--parent-a": AlphaRecord(
+                "repo--parent-a",
+                "repo/parent-a",
+                "/tmp/repo--parent-a",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[1.0, 2.0], [2.0, 3.0]], dtype=float),
+            ),
+            "repo--child-a": AlphaRecord(
+                "repo--child-a",
+                "repo/child-a",
+                "/tmp/repo--child-a",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[2.0, 3.0], [4.0, 5.0]], dtype=float),
+            ),
+            "peer-b": AlphaRecord(
+                "peer-b",
+                "repo/peer-b",
+                "/tmp/peer-b",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[0.5, 1.5], [1.5, 2.5]], dtype=float),
+            ),
+            "peer-c": AlphaRecord(
+                "peer-c",
+                "repo/peer-c",
+                "/tmp/peer-c",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[0.75, 1.75], [1.75, 2.75]], dtype=float),
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.object(
+                performance_trend_diagnostics,
+                "build_prediction_dataset",
+                return_value=(dataset, records),
+            ):
+                exit_code = performance_trend_diagnostics.main(["--output-dir", temp_dir])
+
+            self.assertEqual(exit_code, 0)
+            output_dir = performance_trend_diagnostics.Path(temp_dir)
+            for file_name in [
+                "absolute_trend_dataset.csv",
+                "exact_parent_delta_dataset.csv",
+                "family_relative_delta_dataset.csv",
+                "trend_results.csv",
+                "report.md",
+            ]:
+                self.assertTrue((output_dir / file_name).exists(), file_name)
+
+            results = pd.read_csv(output_dir / "trend_results.csv")
+            self.assertEqual(
+                list(results.columns),
+                ["analysis", "bucket", "target", "feature", "control_mode", "n", "spearman"],
+            )
+
+            exact_parent = pd.read_csv(output_dir / "exact_parent_delta_dataset.csv")
+            self.assertIn("source_model", exact_parent.columns)
+            self.assertIn("parent_model_id", exact_parent.columns)
+            row = exact_parent.loc[exact_parent["model_id"].eq("repo--child-a")].iloc[0]
+            self.assertEqual(row["source_model"], "repo/parent-a")
+            self.assertEqual(row["parent_model_id"], "repo--parent-a")

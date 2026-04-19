@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from scipy.stats import spearmanr
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, r2_score
+from scipy.stats import pearsonr, spearmanr
 
 from alpha_cluster_dashboard.data import AlphaRecord
 
@@ -25,8 +23,6 @@ ANALYSIS_COLUMNS = (
     "control_mode",
     "n",
     "spearman",
-    "r2",
-    "mae",
 )
 
 
@@ -153,7 +149,6 @@ def build_exact_parent_delta_frame(feature_frame: pd.DataFrame) -> pd.DataFrame:
         if relation not in EXACT_PARENT_RELATIONS:
             continue
         parent = None
-        parent_id = source_model
         for key in _model_identity_keys(source_model):
             if key in by_display_name.index:
                 parent = by_display_name.loc[key]
@@ -165,8 +160,7 @@ def build_exact_parent_delta_frame(feature_frame: pd.DataFrame) -> pd.DataFrame:
             continue
         if isinstance(parent, pd.DataFrame):
             parent = parent.iloc[0]
-        if not parent_id:
-            parent_id = _clean_key(parent.get("display_name", "")) or _clean_key(parent.get("model_id", ""))
+        parent_id = _clean_key(parent.get("model_id", ""))
         delta_row = {**row, "parent_model_id": parent_id}
         for column in TREND_FEATURE_COLUMNS:
             delta_row[f"{column}_delta"] = float(row[column]) - float(parent[column])
@@ -202,30 +196,52 @@ def build_family_relative_delta_frame(feature_frame: pd.DataFrame) -> pd.DataFra
     return pd.DataFrame(rows).reindex(columns=_family_relative_delta_columns(feature_frame))
 
 
-def _linear_fit_metrics(frame: pd.DataFrame, feature_columns: list[str], target_column: str) -> tuple[float, float]:
-    fit_frame = frame.loc[:, [*feature_columns, target_column]].dropna()
-    if len(fit_frame) < 4:
-        return float("nan"), float("nan")
-
-    x = fit_frame.loc[:, feature_columns].to_numpy(dtype=float)
-    y = fit_frame[target_column].to_numpy(dtype=float)
-
-    model = LinearRegression()
-    model.fit(x, y)
-    predictions = model.predict(x)
-    try:
-        r2 = float(r2_score(y, predictions))
-    except ValueError:
-        r2 = float("nan")
-    try:
-        mae = float(mean_absolute_error(y, predictions))
-    except ValueError:
-        mae = float("nan")
-    return r2, mae
-
-
 def _spearman(feature: pd.Series, target: pd.Series) -> float:
     corr = spearmanr(feature.to_numpy(dtype=float), target.to_numpy(dtype=float), nan_policy="omit")
+    statistic = getattr(corr, "statistic", corr[0])
+    return float(statistic)
+
+
+def _rank_array(values: np.ndarray) -> np.ndarray:
+    return pd.Series(values).rank(method="average").to_numpy(dtype=float)
+
+
+def _residualize(response: np.ndarray, covariates: np.ndarray) -> np.ndarray:
+    design = np.column_stack([np.ones(response.shape[0], dtype=float), covariates])
+    coefficients, *_ = np.linalg.lstsq(design, response, rcond=None)
+    return response - design @ coefficients
+
+
+def _partial_spearman(feature: pd.Series, target: pd.Series, controls: pd.DataFrame) -> float:
+    matrix = np.column_stack(
+        [
+            feature.to_numpy(dtype=float),
+            target.to_numpy(dtype=float),
+            controls.to_numpy(dtype=float),
+        ]
+    )
+    finite_mask = np.all(np.isfinite(matrix), axis=1)
+    pair_count = int(np.count_nonzero(finite_mask))
+    if pair_count < 4:
+        return float("nan")
+
+    x_values = feature.to_numpy(dtype=float)[finite_mask]
+    y_values = target.to_numpy(dtype=float)[finite_mask]
+    control_values = controls.to_numpy(dtype=float)[finite_mask]
+    if np.nanstd(x_values) < 1e-12 or np.nanstd(y_values) < 1e-12:
+        return float("nan")
+
+    ranked_x = _rank_array(x_values)
+    ranked_y = _rank_array(y_values)
+    ranked_controls = np.column_stack(
+        [_rank_array(control_values[:, index]) for index in range(control_values.shape[1])]
+    )
+    x_residual = _residualize(ranked_x, ranked_controls)
+    y_residual = _residualize(ranked_y, ranked_controls)
+    if np.nanstd(x_residual) < 1e-12 or np.nanstd(y_residual) < 1e-12:
+        return float("nan")
+
+    corr = pearsonr(x_residual, y_residual)
     statistic = getattr(corr, "statistic", corr[0])
     return float(statistic)
 
@@ -260,13 +276,13 @@ def analyze_trend_rows(
             if len(subset) < 4:
                 continue
 
-            fit_columns = [feature]
             control_mode = "raw"
             if use_structural_controls:
-                fit_columns = [feature, *[column for column in structural.columns if column in subset.columns]]
                 control_mode = "structural_adjusted"
-
-            r2, mae = _linear_fit_metrics(subset, fit_columns, target)
+                control_columns = [column for column in structural.columns if column in subset.columns]
+                spearman = _partial_spearman(subset[feature], subset[target], subset.loc[:, control_columns])
+            else:
+                spearman = _spearman(subset[feature], subset[target])
             rows.append(
                 {
                     "analysis": analysis_name,
@@ -275,9 +291,7 @@ def analyze_trend_rows(
                     "feature": feature,
                     "control_mode": control_mode,
                     "n": int(len(subset)),
-                    "spearman": _spearman(subset[feature], subset[target]),
-                    "r2": r2,
-                    "mae": mae,
+                    "spearman": spearman,
                 }
             )
 
@@ -333,10 +347,12 @@ def render_trend_report(results: pd.DataFrame) -> str:
         subset = results.loc[results["analysis"].eq(analysis)].copy()
         if subset.empty:
             return subset
+        subset["abs_spearman"] = subset["spearman"].abs()
         return (
-            subset.sort_values(["target", "r2", "spearman"], ascending=[True, False, False])
+            subset.sort_values(["target", "abs_spearman", "spearman"], ascending=[True, False, False])
             .groupby("target", as_index=False)
             .head(3)
+            .drop(columns=["abs_spearman"])
             .reset_index(drop=True)
         )
 
@@ -347,19 +363,19 @@ def render_trend_report(results: pd.DataFrame) -> str:
             "## Top Absolute-Trend Rows By Target",
             _markdown_table(
                 best_rows("absolute"),
-                ["bucket", "target", "feature", "control_mode", "n", "spearman", "r2", "mae"],
+                ["bucket", "target", "feature", "control_mode", "n", "spearman"],
             ),
             "",
             "## Top Exact-Parent Rows By Target",
             _markdown_table(
                 best_rows("exact_parent"),
-                ["bucket", "target", "feature", "control_mode", "n", "spearman", "r2", "mae"],
+                ["bucket", "target", "feature", "control_mode", "n", "spearman"],
             ),
             "",
             "## Top Family-Relative Rows By Target",
             _markdown_table(
                 best_rows("family_relative"),
-                ["bucket", "target", "feature", "control_mode", "n", "spearman", "r2", "mae"],
+                ["bucket", "target", "feature", "control_mode", "n", "spearman"],
             ),
             "",
             "## Notes",

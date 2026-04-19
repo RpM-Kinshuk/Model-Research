@@ -12,6 +12,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from spectral_research.prediction import PERFORMANCE_TARGETS, build_prediction_dataset
 from spectral_research.trend_diagnostics import (
+    ANALYSIS_COLUMNS,
     TREND_FEATURE_COLUMNS,
     analyze_trend_rows,
     build_absolute_trend_frame,
@@ -111,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     non_empty_results = [frame for frame in results if not frame.empty]
     result_frame = pd.concat(non_empty_results, ignore_index=True) if non_empty_results else pd.DataFrame()
     if result_frame.empty:
-        result_frame = pd.DataFrame(columns=["analysis", "bucket", "target", "feature", "control_mode", "n", "spearman", "r2", "mae"])
+        result_frame = pd.DataFrame(columns=list(ANALYSIS_COLUMNS))
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     _write(absolute, args.output_dir / "absolute_trend_dataset.csv")
