@@ -193,6 +193,7 @@ Suggested column groups:
 - normalized repo identifier
 - display or full name
 - revision if applicable
+- normalized `repo_id@revision` form if a revision is explicitly tracked
 
 ### Lineage
 
@@ -201,6 +202,7 @@ Suggested column groups:
 - lineage provenance source
 - lineage confidence band
 - known vs unknown lineage flag
+- adapter base-model resolution status when relevant
 
 ### Type Taxonomy
 
@@ -287,7 +289,15 @@ Recommended lightweight checks:
 - existence of key files such as:
   - `config.json`
   - safetensor or weight index files when present
+  - `adapter_config.json` for adapter-style repos when relevant
 - optional dry-run file probe for small files only
+
+The fetchability check should be aligned with the current loader family, which means:
+
+- revision-aware repos should keep revision information if known
+- adapter-style repos should be recognized separately from standard model repos
+- adapter rows should prefer a resolvable base-model reference when available
+- a repo can be considered `public` but still flagged as `public but structurally incomplete` if it is unlikely to load under the current loader assumptions
 
 The curation outcome should be:
 
@@ -298,6 +308,14 @@ The curation outcome should be:
 - `public but probe failed`
 
 This is enough for curation. The full download-and-analysis process belongs to a later phase and is intentionally out of scope here.
+
+In other words, phase 2 should answer:
+
+- does the repo seem reachable?
+- does it expose the files and metadata expected by the current loader family?
+- if it is an adapter-style repo, does it have enough information to resolve a base model later?
+
+It should not try to prove that the full load will succeed in every case.
 
 ## Collection Pipeline
 
