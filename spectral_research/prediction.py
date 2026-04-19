@@ -189,6 +189,21 @@ def _pair_score(
             return float("nan")
         return _negative_l2(left_record.alpha[:depth], right_record.alpha[:depth])
 
+    if method == "schema_routed_trace":
+        if tuple(left_record.raw_modules) == tuple(right_record.raw_modules):
+            depth = min(left_record.alpha.shape[0], right_record.alpha.shape[0])
+            if depth > 0:
+                full_module_trace = _negative_l2(left_record.alpha[:depth], right_record.alpha[:depth])
+                if np.isfinite(full_module_trace):
+                    return full_module_trace
+        return role_aggregated_trace_score(
+            query_alpha=np.asarray(left_record.alpha, dtype=float),
+            query_modules=tuple(left_record.raw_modules),
+            proto_alpha=np.asarray(right_record.alpha, dtype=float),
+            proto_modules=tuple(right_record.raw_modules),
+            overlap_penalty=0.2,
+        )
+
     if method == "role_aggregated_trace":
         return role_aggregated_trace_score(
             query_alpha=np.asarray(left_record.alpha, dtype=float),

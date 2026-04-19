@@ -776,6 +776,111 @@ class PredictionOptimizationModeTests(unittest.TestCase):
         )
 
 
+class PredictionRoutingTests(PredictionOptimizationModeTests):
+    def test_schema_routed_trace_matches_full_trace_when_exact_scores_exist(self) -> None:
+        frame = self._frame()
+        records_by_model_id = self._records()
+
+        full_trace_matrix, model_index = build_pairwise_score_matrix(
+            frame,
+            records_by_model_id,
+            method="full_module_trace",
+            backend="cpu",
+        )
+        routed_matrix, routed_index = build_pairwise_score_matrix(
+            frame,
+            records_by_model_id,
+            method="schema_routed_trace",
+            backend="cpu",
+        )
+
+        self.assertEqual(model_index, routed_index)
+        np.testing.assert_allclose(routed_matrix, full_trace_matrix, rtol=0.0, atol=0.0, equal_nan=True)
+
+    def test_schema_routed_trace_falls_back_to_role_aggregated_when_full_trace_is_nan(self) -> None:
+        frame = pd.DataFrame(
+            [
+                {
+                    "model_id": "m1",
+                    "display_name": "repo/m1",
+                    "audited_base_family": "fam/a",
+                    "candidate_family": "fam/a",
+                    "cv_group": "fam/a",
+                    "label_status": "confirmed",
+                    "query_bucket": "supported_candidate",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "common_schema": False,
+                    "schema_name": "bert_like",
+                    "Average ⬆️": 10.0,
+                },
+                {
+                    "model_id": "m2",
+                    "display_name": "repo/m2",
+                    "audited_base_family": "fam/a",
+                    "candidate_family": "fam/a",
+                    "cv_group": "fam/a",
+                    "label_status": "confirmed",
+                    "query_bucket": "supported_candidate",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "common_schema": False,
+                    "schema_name": "bert_like",
+                    "Average ⬆️": 12.0,
+                },
+            ]
+        )
+        records_by_model_id = {
+            "m1": AlphaRecord(
+                "m1",
+                "repo/m1",
+                "/tmp/m1",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[1.0, 2.0], [1.0, 2.0]]),
+            ),
+            "m2": AlphaRecord(
+                "m2",
+                "repo/m2",
+                "/tmp/m2",
+                2,
+                ("self_attn.k_proj", "mlp.up_proj"),
+                np.array([[1.1, 2.1], [1.1, 2.1]]),
+            ),
+        }
+
+        full_trace_matrix, model_index = build_pairwise_score_matrix(
+            frame,
+            records_by_model_id,
+            method="full_module_trace",
+            backend="cpu",
+        )
+        routed_matrix, routed_index = build_pairwise_score_matrix(
+            frame,
+            records_by_model_id,
+            method="schema_routed_trace",
+            backend="cpu",
+        )
+        role_aggregated_matrix, role_index = build_pairwise_score_matrix(
+            frame,
+            records_by_model_id,
+            method="role_aggregated_trace",
+            backend="cpu",
+        )
+
+        self.assertEqual(model_index, routed_index)
+        self.assertEqual(model_index, role_index)
+        self.assertTrue(np.isnan(full_trace_matrix[model_index["m1"], model_index["m2"]]))
+        self.assertTrue(np.isfinite(role_aggregated_matrix[model_index["m1"], model_index["m2"]]))
+        np.testing.assert_allclose(
+            routed_matrix,
+            role_aggregated_matrix,
+            rtol=0.0,
+            atol=0.0,
+            equal_nan=True,
+        )
+
+
 class PredictionCliTests(unittest.TestCase):
     def _load_module(self):
         script_path = (
