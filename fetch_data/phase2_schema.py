@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import re
 
@@ -140,3 +141,93 @@ def classify_loader_scenario_from_row(row: pd.Series) -> str:
     if relation == "quantized":
         return "quantized_transformers_native"
     return "standard_transformers"
+
+
+def load_atlas_candidates(atlas_json_path: Path) -> pd.DataFrame:
+    data = json.loads(atlas_json_path.read_text())
+    rows = []
+    for node in data.get("nodes", []):
+        attrs = node.get("attributes", {})
+        rows.append(
+            {
+                "model_id": node["id"],
+                "source_model": attrs.get("base_model_clean"),
+                "base_model_relation": attrs.get("base_model_relation", "unknown"),
+            }
+        )
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return pd.DataFrame(
+            columns=[
+                "model_id",
+                "source_model",
+                "base_model_relation",
+                "repo_id_norm",
+                "revision_norm",
+                "canonical_model_key",
+            ]
+        )
+    repo_revision = frame["model_id"].map(parse_repo_and_revision)
+    frame["repo_id_norm"] = [item[0] for item in repo_revision]
+    frame["revision_norm"] = [item[1] for item in repo_revision]
+    frame["canonical_model_key"] = [
+        canonical_model_key(repo_id, revision)
+        for repo_id, revision in zip(frame["repo_id_norm"], frame["revision_norm"], strict=False)
+    ]
+    return frame
+
+
+def add_lineage_flags(frame: pd.DataFrame) -> pd.DataFrame:
+    result = frame.copy()
+    source = result.get("source_model", pd.Series(index=result.index, dtype="object")).fillna("")
+    result["known_lineage_flag"] = source.ne("") & source.ne("unknown") & source.ne("N/A")
+    return result
+
+
+def apply_type_taxonomy(frame: pd.DataFrame) -> pd.DataFrame:
+    result = frame.copy()
+    result["primary_type_bucket"] = result.apply(classify_primary_type, axis=1)
+    result["loader_scenario"] = result.apply(classify_loader_scenario_from_row, axis=1)
+    result["is_adapter"] = result["primary_type_bucket"].eq("adapter")
+    result["is_merge"] = result["primary_type_bucket"].eq("merge")
+    result["is_quantized"] = result["primary_type_bucket"].eq("quantized")
+    result["is_multimodal"] = result["loader_scenario"].eq("multimodal_transformers")
+    return result
+
+
+def select_to_target(frame: pd.DataFrame, target_size: int) -> pd.DataFrame:
+    result = frame.copy()
+    result["selection_priority"] = (
+        result["analysis_artifact_present"].fillna(False).astype(int) * 4
+        + result["known_lineage_flag"].fillna(False).astype(int) * 2
+        + result["primary_type_bucket"].isin({"adapter", "quantized", "merge", "multimodal"}).astype(int)
+    )
+    ordered = (
+        result.sort_values(
+            ["primary_type_bucket", "selection_priority", "canonical_model_key"],
+            ascending=[True, False, True],
+        )
+        .drop_duplicates(subset=["canonical_model_key"], keep="first")
+        .reset_index(drop=True)
+    )
+
+    buckets = {
+        bucket: bucket_frame.reset_index(drop=True)
+        for bucket, bucket_frame in ordered.groupby("primary_type_bucket", sort=True)
+    }
+    selected_rows = []
+    round_index = 0
+    while len(selected_rows) < target_size:
+        progressed = False
+        for bucket in sorted(buckets):
+            bucket_frame = buckets[bucket]
+            if round_index < len(bucket_frame):
+                selected_rows.append(bucket_frame.iloc[round_index].to_dict())
+                progressed = True
+                if len(selected_rows) >= target_size:
+                    break
+        if not progressed:
+            break
+        round_index += 1
+
+    return pd.DataFrame(selected_rows).reset_index(drop=True)

@@ -122,3 +122,14 @@ def probe_repo_fetchability(
     if dry_run_probe is not None and result.fetchability_status == "public_and_likely_fetchable":
         dry_run_probe(repo_id, revision)
     return result
+
+
+def dry_run_small_file(repo_id: str, revision: str | None) -> object:
+    from huggingface_hub import hf_hub_download
+
+    return hf_hub_download(
+        repo_id=repo_id,
+        filename="config.json",
+        revision=revision,
+        dry_run=True,
+    )
