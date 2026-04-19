@@ -44,9 +44,9 @@
 
 ## Output files
 
-- Canonical report: `correlation_runs/csv_alpha_leaderboard/report.md`
-- Common-schema report: `correlation_runs/csv_common_schema_research/report.md`
+- Canonical report: `archive/correlation_runs/csv_alpha_leaderboard/report.md`
+- Common-schema report when rerun via the preserved legacy helper chain: `research_runs/legacy/common_schema_performance_research/report.md`
 - Visuals:
-  - `correlation_runs/csv_alpha_visuals/common_alpha_median_module_spread_vs_math_lvl5.png`
-  - `correlation_runs/csv_alpha_visuals/partial_attn_k_start_vs_math_lvl5.png`
-  - `correlation_runs/csv_alpha_visuals/selected_alpha_signals_heatmap.png`
+  - `archive/correlation_runs/csv_alpha_visuals/common_alpha_median_module_spread_vs_math_lvl5.png`
+  - `archive/correlation_runs/csv_alpha_visuals/partial_attn_k_start_vs_math_lvl5.png`
+  - `archive/correlation_runs/csv_alpha_visuals/selected_alpha_signals_heatmap.png`
