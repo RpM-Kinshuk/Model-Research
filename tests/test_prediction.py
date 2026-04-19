@@ -548,6 +548,185 @@ class PredictionOptimizationTests(unittest.TestCase):
             atol=0.0,
         )
 
+    def test_cached_full_module_trace_keeps_legitimate_nan_scores(self) -> None:
+        frame = pd.DataFrame(
+            [
+                {
+                    "model_id": "m1",
+                    "display_name": "repo/m1",
+                    "audited_base_family": "fam/a",
+                    "candidate_family": "fam/a",
+                    "cv_group": "fam/a",
+                    "label_status": "confirmed",
+                    "query_bucket": "supported_candidate",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "common_schema": True,
+                    "schema_name": "common",
+                    "Average ⬆️": 10.0,
+                },
+                {
+                    "model_id": "m2",
+                    "display_name": "repo/m2",
+                    "audited_base_family": "fam/a",
+                    "candidate_family": "fam/a",
+                    "cv_group": "fam/a",
+                    "label_status": "confirmed",
+                    "query_bucket": "supported_candidate",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "common_schema": True,
+                    "schema_name": "common",
+                    "Average ⬆️": 20.0,
+                },
+                {
+                    "model_id": "m3",
+                    "display_name": "repo/m3",
+                    "audited_base_family": "fam/b",
+                    "candidate_family": "fam/b",
+                    "cv_group": "fam/b",
+                    "label_status": "provisional",
+                    "query_bucket": "heterogeneous",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "common_schema": False,
+                    "schema_name": "bert_like",
+                    "Average ⬆️": 30.0,
+                },
+                {
+                    "model_id": "m4",
+                    "display_name": "repo/m4",
+                    "audited_base_family": "fam/b",
+                    "candidate_family": "fam/b",
+                    "cv_group": "fam/b",
+                    "label_status": "provisional",
+                    "query_bucket": "heterogeneous",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "common_schema": False,
+                    "schema_name": "bert_like",
+                    "Average ⬆️": 40.0,
+                },
+                {
+                    "model_id": "m5",
+                    "display_name": "repo/m5",
+                    "audited_base_family": "fam/c",
+                    "candidate_family": "fam/c",
+                    "cv_group": "fam/c",
+                    "label_status": "confirmed",
+                    "query_bucket": "supported_candidate",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "common_schema": True,
+                    "schema_name": "common",
+                    "Average ⬆️": 50.0,
+                },
+                {
+                    "model_id": "m6",
+                    "display_name": "repo/m6",
+                    "audited_base_family": "fam/c",
+                    "candidate_family": "fam/c",
+                    "cv_group": "fam/c",
+                    "label_status": "confirmed",
+                    "query_bucket": "supported_candidate",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "common_schema": True,
+                    "schema_name": "common",
+                    "Average ⬆️": 60.0,
+                },
+            ]
+        )
+        records_by_model_id = {
+            "m1": AlphaRecord(
+                "m1",
+                "repo/m1",
+                "/tmp/m1",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[1.0, 2.0], [1.0, 2.0]]),
+            ),
+            "m2": AlphaRecord(
+                "m2",
+                "repo/m2",
+                "/tmp/m2",
+                2,
+                ("self_attn.k_proj", "mlp.up_proj"),
+                np.array([[3.0, 4.0], [3.0, 4.0]]),
+            ),
+            "m3": AlphaRecord(
+                "m3",
+                "repo/m3",
+                "/tmp/m3",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[1.1, 2.1], [1.1, 2.1]]),
+            ),
+            "m4": AlphaRecord(
+                "m4",
+                "repo/m4",
+                "/tmp/m4",
+                2,
+                ("self_attn.v_proj", "mlp.gate_proj"),
+                np.array([[5.0, 6.0], [5.0, 6.0]]),
+            ),
+            "m5": AlphaRecord(
+                "m5",
+                "repo/m5",
+                "/tmp/m5",
+                2,
+                ("self_attn.k_proj", "mlp.up_proj"),
+                np.array([[3.1, 4.1], [3.1, 4.1]]),
+            ),
+            "m6": AlphaRecord(
+                "m6",
+                "repo/m6",
+                "/tmp/m6",
+                2,
+                ("self_attn.v_proj", "mlp.gate_proj"),
+                np.array([[5.1, 6.1], [5.1, 6.1]]),
+            ),
+        }
+
+        uncached = neighborhood_predict_oof(
+            frame=frame,
+            records_by_model_id=records_by_model_id,
+            target="Average ⬆️",
+            method="full_module_trace",
+            k=1,
+            weighted=False,
+            residualize=False,
+        )
+        matrix, model_index = build_pairwise_score_matrix(
+            frame,
+            records_by_model_id,
+            method="full_module_trace",
+            backend="cpu",
+        )
+        self.assertTrue(np.isnan(matrix[model_index["m1"], model_index["m4"]]))
+        self.assertTrue(np.isfinite(matrix[model_index["m1"], model_index["m3"]]))
+
+        with patch("spectral_research.prediction._pair_score", side_effect=AssertionError("cache miss")):
+            cached = neighborhood_predict_oof(
+                frame=frame,
+                records_by_model_id=records_by_model_id,
+                target="Average ⬆️",
+                method="full_module_trace",
+                k=1,
+                weighted=False,
+                residualize=False,
+                pairwise_scores=matrix,
+                model_index=model_index,
+            )
+
+        np.testing.assert_allclose(
+            cached["prediction"].to_numpy(dtype=float),
+            uncached["prediction"].to_numpy(dtype=float),
+            rtol=0.0,
+            atol=0.0,
+            equal_nan=True,
+        )
+
 
 class PredictionCliTests(unittest.TestCase):
     def _load_module(self):

@@ -302,12 +302,14 @@ def neighborhood_predict_oof(
                 if train_model_id == test_model_id:
                     continue
                 score = np.nan
+                cache_hit = False
                 if pairwise_scores is not None and model_index is not None:
                     left_index = model_index.get(test_model_id)
                     right_index = model_index.get(train_model_id)
                     if left_index is not None and right_index is not None:
                         score = float(pairwise_scores[left_index, right_index])
-                if not np.isfinite(score):
+                        cache_hit = True
+                if not cache_hit:
                     score = _pair_score(
                         method=method,
                         left_row=test_row,
