@@ -208,3 +208,6 @@ __marimo__/
 
 # Local git worktrees
 .worktrees/
+
+# Large data files
+large_nlp_data.json
