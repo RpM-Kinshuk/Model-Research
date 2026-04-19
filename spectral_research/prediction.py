@@ -2,10 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+from scipy.stats import spearmanr
+from sklearn.linear_model import Ridge
+from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.model_selection import GroupKFold
 
 from alpha_cluster_dashboard.data import AlphaRecord, load_alpha_records, schema_name
 from spectral_research.benchmark import build_audit_manifest
+from spectral_research.features import alpha_scalar_features
+from spectral_research.heterogeneity import role_aggregated_trace_score, structural_basics_feature_map
 
 PERFORMANCE_TARGETS = ("Average ⬆️", "MMLU-PRO", "MATH Lvl 5")
 
@@ -85,6 +92,242 @@ def join_prediction_targets(manifest: pd.DataFrame, leaderboard: pd.DataFrame) -
 
     joined["cv_group"] = joined.apply(_group_key, axis=1)
     return joined
+
+
+def _negative_l2(left: np.ndarray, right: np.ndarray) -> float:
+    left_array = np.asarray(left, dtype=float)
+    right_array = np.asarray(right, dtype=float)
+    mask = np.isfinite(left_array) & np.isfinite(right_array)
+    if not mask.any():
+        return float("nan")
+    delta = left_array[mask] - right_array[mask]
+    return float(-np.mean(delta * delta))
+
+
+def _cv_groups(frame: pd.DataFrame) -> np.ndarray:
+    if "cv_group" in frame.columns:
+        groups = frame["cv_group"]
+    else:
+        groups = frame.apply(_group_key, axis=1)
+    return groups.fillna("unknown").astype(str).to_numpy()
+
+
+def _group_kfold(frame: pd.DataFrame, *, cv_splits: int) -> GroupKFold | None:
+    group_count = pd.Index(_cv_groups(frame)).nunique()
+    if group_count < 2:
+        return None
+    return GroupKFold(n_splits=min(cv_splits, group_count))
+
+
+def _pair_score(
+    *,
+    method: str,
+    left_row: pd.Series,
+    right_row: pd.Series,
+    left_record: AlphaRecord | None,
+    right_record: AlphaRecord | None,
+    structural_vectors: dict[str, np.ndarray],
+) -> float:
+    left_model_id = str(left_row["model_id"])
+    right_model_id = str(right_row["model_id"])
+
+    if method == "structural_basics_only":
+        left_vector = structural_vectors.get(left_model_id)
+        right_vector = structural_vectors.get(right_model_id)
+        if left_vector is None or right_vector is None:
+            return float("nan")
+        return _negative_l2(left_vector, right_vector)
+
+    if left_record is None or right_record is None:
+        return float("nan")
+
+    if method == "pl_alpha_scalar":
+        return _negative_l2(
+            alpha_scalar_features(left_record.alpha).reshape(-1),
+            alpha_scalar_features(right_record.alpha).reshape(-1),
+        )
+
+    if method == "full_module_trace":
+        if tuple(left_record.raw_modules) != tuple(right_record.raw_modules):
+            return float("nan")
+        depth = min(left_record.alpha.shape[0], right_record.alpha.shape[0])
+        if depth <= 0:
+            return float("nan")
+        return _negative_l2(left_record.alpha[:depth], right_record.alpha[:depth])
+
+    if method == "role_aggregated_trace":
+        return role_aggregated_trace_score(
+            query_alpha=np.asarray(left_record.alpha, dtype=float),
+            query_modules=tuple(left_record.raw_modules),
+            proto_alpha=np.asarray(right_record.alpha, dtype=float),
+            proto_modules=tuple(right_record.raw_modules),
+            overlap_penalty=0.2,
+        )
+
+    raise KeyError(f"Unsupported method: {method}")
+
+
+def _weighted_mean(scored_neighbors: list[tuple[float, float]]) -> float:
+    scores = np.asarray([score for score, _ in scored_neighbors], dtype=float)
+    values = np.asarray([value for _, value in scored_neighbors], dtype=float)
+    weights = np.exp(scores - scores.max())
+    return float(np.average(values, weights=weights))
+
+
+def structural_baseline_oof(
+    frame: pd.DataFrame, *, target: str, cv_splits: int = 5
+) -> pd.DataFrame:
+    out = frame[["model_id", "query_bucket", target]].copy()
+    out["baseline_prediction"] = np.nan
+    out["mode"] = "structural_baseline"
+
+    if out.empty:
+        return out
+
+    vectors = structural_basics_feature_map(frame)
+    y = frame[target].to_numpy(dtype=float)
+    groups = _cv_groups(frame)
+    splitter = _group_kfold(frame, cv_splits=cv_splits)
+
+    if splitter is None:
+        out["baseline_prediction"] = float(np.nanmean(y))
+        return out
+
+    prediction_column = out.columns.get_loc("baseline_prediction")
+    for train_idx, test_idx in splitter.split(frame, y, groups):
+        x_train = np.vstack([vectors[str(frame.iloc[index]["model_id"])] for index in train_idx])
+        x_test = np.vstack([vectors[str(frame.iloc[index]["model_id"])] for index in test_idx])
+        model = Ridge(alpha=1.0)
+        model.fit(x_train, y[train_idx])
+        out.iloc[test_idx, prediction_column] = model.predict(x_test)
+
+    return out
+
+
+def neighborhood_predict_oof(
+    frame: pd.DataFrame,
+    records_by_model_id: dict[str, AlphaRecord],
+    *,
+    target: str,
+    method: str,
+    k: int,
+    weighted: bool,
+    residualize: bool,
+    cv_splits: int = 5,
+) -> pd.DataFrame:
+    out = frame[["model_id", "query_bucket", target]].copy()
+    out["prediction"] = np.nan
+    out["mode"] = "spectral_plus_structural" if residualize else "raw_spectral"
+
+    if out.empty:
+        return out
+
+    structural_vectors = structural_basics_feature_map(frame)
+    baseline = structural_baseline_oof(frame, target=target, cv_splits=cv_splits)
+    baseline_by_model_id = {
+        str(model_id): float(prediction)
+        for model_id, prediction in zip(
+            baseline["model_id"],
+            baseline["baseline_prediction"],
+            strict=False,
+        )
+    }
+    target_by_model_id = {
+        str(model_id): float(value)
+        for model_id, value in zip(frame["model_id"], frame[target], strict=False)
+    }
+    working_target_by_model_id = {
+        model_id: target_by_model_id[model_id] - baseline_by_model_id[model_id]
+        if residualize
+        else target_by_model_id[model_id]
+        for model_id in target_by_model_id
+    }
+
+    groups = _cv_groups(frame)
+    splitter = _group_kfold(frame, cv_splits=cv_splits)
+    splits = (
+        list(splitter.split(frame, frame[target].to_numpy(dtype=float), groups))
+        if splitter is not None
+        else [(np.arange(len(frame), dtype=int), np.arange(len(frame), dtype=int))]
+    )
+
+    prediction_column = out.columns.get_loc("prediction")
+    for train_idx, test_idx in splits:
+        train_frame = frame.iloc[train_idx]
+        for test_position in test_idx:
+            test_row = frame.iloc[test_position]
+            test_model_id = str(test_row["model_id"])
+            test_record = records_by_model_id.get(test_model_id)
+            scored_neighbors: list[tuple[float, float]] = []
+            for train_row in train_frame.itertuples(index=False):
+                train_model_id = str(train_row.model_id)
+                if train_model_id == test_model_id:
+                    continue
+                score = _pair_score(
+                    method=method,
+                    left_row=test_row,
+                    right_row=pd.Series(train_row._asdict()),
+                    left_record=test_record,
+                    right_record=records_by_model_id.get(train_model_id),
+                    structural_vectors=structural_vectors,
+                )
+                if not np.isfinite(score):
+                    continue
+                scored_neighbors.append((float(score), working_target_by_model_id[train_model_id]))
+
+            scored_neighbors.sort(key=lambda item: item[0], reverse=True)
+            top_neighbors = scored_neighbors[:k]
+            if not top_neighbors:
+                continue
+
+            prediction = (
+                _weighted_mean(top_neighbors)
+                if weighted
+                else float(np.mean([value for _, value in top_neighbors]))
+            )
+            if residualize:
+                prediction += baseline_by_model_id[test_model_id]
+            out.iloc[test_position, prediction_column] = prediction
+
+    return out
+
+
+def summarize_predictions(
+    predictions: pd.DataFrame, *, target: str, method: str, k: int, weighted: bool
+) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    mode = (
+        str(predictions["mode"].iloc[0])
+        if "mode" in predictions.columns and not predictions.empty
+        else ("structural_baseline" if method == "structural_basics_only" else "raw_spectral")
+    )
+
+    for bucket, bucket_frame in predictions.groupby("query_bucket", dropna=False):
+        valid = bucket_frame["prediction"].notna()
+        if not valid.any():
+            continue
+
+        y_true = bucket_frame.loc[valid, target].to_numpy(dtype=float)
+        y_pred = bucket_frame.loc[valid, "prediction"].to_numpy(dtype=float)
+        mae = float(mean_absolute_error(y_true, y_pred))
+        r2 = float(r2_score(y_true, y_pred)) if len(y_true) >= 2 else float("nan")
+        rho = float(spearmanr(y_true, y_pred).statistic) if len(y_true) >= 2 else float("nan")
+        rows.append(
+            {
+                "target": target,
+                "method": method,
+                "mode": mode,
+                "bucket": bucket,
+                "k": int(k),
+                "weighted": bool(weighted),
+                "n": int(valid.sum()),
+                "r2": r2,
+                "mae": mae,
+                "spearman": rho,
+            }
+        )
+
+    return pd.DataFrame(rows)
 
 
 def _records_frame(records: list[AlphaRecord]) -> pd.DataFrame:

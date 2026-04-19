@@ -7,7 +7,12 @@ import numpy as np
 import pandas as pd
 
 from alpha_cluster_dashboard.data import AlphaRecord, COMMON_ALPHA_MODULES, schema_name
-from spectral_research.prediction import _group_key, join_prediction_targets
+from spectral_research.prediction import (
+    _group_key,
+    join_prediction_targets,
+    neighborhood_predict_oof,
+    structural_baseline_oof,
+)
 
 
 class PredictionDatasetTests(unittest.TestCase):
@@ -196,3 +201,123 @@ class PredictionDatasetTests(unittest.TestCase):
         )
         self.assertEqual(set(records_by_model_id), {"common-a", "hetero-a"})
         self.assertEqual(len(joined), 2)
+
+
+class PredictionModelTests(unittest.TestCase):
+    def _records(self) -> dict[str, AlphaRecord]:
+        return {
+            "m1": AlphaRecord(
+                "m1",
+                "repo/m1",
+                "/tmp/m1",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[1.0, 2.0], [1.0, 2.0]]),
+            ),
+            "m2": AlphaRecord(
+                "m2",
+                "repo/m2",
+                "/tmp/m2",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[1.1, 2.1], [1.1, 2.1]]),
+            ),
+            "m3": AlphaRecord(
+                "m3",
+                "repo/m3",
+                "/tmp/m3",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[9.0, 9.0], [9.0, 9.0]]),
+            ),
+            "m4": AlphaRecord(
+                "m4",
+                "repo/m4",
+                "/tmp/m4",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[9.2, 9.1], [9.1, 9.2]]),
+            ),
+        }
+
+    def _frame(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "model_id": "m1",
+                    "display_name": "repo/m1",
+                    "audited_base_family": "fam/a",
+                    "candidate_family": "fam/a",
+                    "cv_group": "fam/a",
+                    "label_status": "confirmed",
+                    "query_bucket": "supported_candidate",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "common_schema": True,
+                    "schema_name": "common",
+                    "Average ⬆️": 10.0,
+                },
+                {
+                    "model_id": "m2",
+                    "display_name": "repo/m2",
+                    "audited_base_family": "fam/a",
+                    "candidate_family": "fam/a",
+                    "cv_group": "fam/a",
+                    "label_status": "confirmed",
+                    "query_bucket": "supported_candidate",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "common_schema": True,
+                    "schema_name": "common",
+                    "Average ⬆️": 12.0,
+                },
+                {
+                    "model_id": "m3",
+                    "display_name": "repo/m3",
+                    "audited_base_family": "fam/b",
+                    "candidate_family": "fam/b",
+                    "cv_group": "fam/b",
+                    "label_status": "provisional",
+                    "query_bucket": "heterogeneous",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "common_schema": False,
+                    "schema_name": "bert_like",
+                    "Average ⬆️": 90.0,
+                },
+                {
+                    "model_id": "m4",
+                    "display_name": "repo/m4",
+                    "audited_base_family": "fam/b",
+                    "candidate_family": "fam/b",
+                    "cv_group": "fam/b",
+                    "label_status": "provisional",
+                    "query_bucket": "heterogeneous",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "common_schema": False,
+                    "schema_name": "bert_like",
+                    "Average ⬆️": 92.0,
+                },
+            ]
+        )
+
+    def test_neighborhood_predict_oof_returns_predictions_for_role_aggregated_trace(self) -> None:
+        predictions = neighborhood_predict_oof(
+            frame=self._frame(),
+            records_by_model_id=self._records(),
+            target="Average ⬆️",
+            method="role_aggregated_trace",
+            k=1,
+            weighted=False,
+            residualize=False,
+        )
+
+        self.assertEqual(len(predictions), 4)
+        self.assertTrue(predictions["prediction"].notna().all())
+
+    def test_structural_baseline_oof_returns_prediction_column(self) -> None:
+        baseline = structural_baseline_oof(self._frame(), target="Average ⬆️")
+
+        self.assertEqual(len(baseline), 4)
+        self.assertIn("baseline_prediction", baseline.columns)
