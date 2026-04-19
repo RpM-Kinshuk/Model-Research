@@ -14,3 +14,13 @@ Out-of-scope for this phase:
 - output-contract redesign
 - replacing `alpha_cluster_dashboard/`
 - new large method families beyond the current ones
+
+## Grouped Artifact Layout
+
+The preliminary runs are organized by purpose under these canonical roots:
+
+- `research_runs/preliminary/retrieval/`
+- `research_runs/preliminary/rejection/`
+- `research_runs/preliminary/prediction/`
+- `research_runs/preliminary/optimization/`
+- `research_runs/preliminary/exploratory/`
