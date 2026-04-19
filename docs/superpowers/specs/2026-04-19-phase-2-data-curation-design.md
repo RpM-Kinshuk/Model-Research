@@ -40,6 +40,10 @@ The next phase should fix those issues while preserving the current sample and t
 3. Keep the data shape simple.
    - One canonical model table should become the default input for experiments.
 
+3a. Handle duplicates explicitly.
+   - Different sources can describe the same repo more than once, especially leaderboard rows with different precisions or duplicate metadata entries.
+   - The canonical table must have a stable dedup rule instead of assuming one input row equals one model.
+
 4. Balance diversity without letting noise take over.
    - Adjacent categories like `MoE`, `multimodal`, `adapter`, and `quantized` should be represented, but not allowed to dominate the zoo.
 
@@ -71,6 +75,7 @@ Important observations from the current sample:
 - `adapter`, `quantized`, `MoE`, and `multimodal` are still thin
 - eval coverage is useful but limited, especially for prediction work
 - many missing analysis rows appear to be recoverable public models, not permanently lost ones
+- leaderboard enrichment already contains duplicate repo groups and therefore needs explicit collapse rules
 
 ## Scope
 
@@ -185,6 +190,15 @@ Suggested location:
 - `data/curated/model_zoo_phase2.csv`
 - optionally a parallel Parquet file for faster downstream use
 
+The canonical row key should be a stable normalized identity such as:
+
+- normalized repo id
+- plus revision when revision is explicitly known and intentionally distinguished
+
+This gives one primary row per logical model in the curated zoo.
+
+When source systems provide multiple rows for the same logical model, the pipeline should preserve the raw evidence separately and collapse it into one canonical row using explicit rules.
+
 Suggested column groups:
 
 ### Identity
@@ -194,6 +208,7 @@ Suggested column groups:
 - display or full name
 - revision if applicable
 - normalized `repo_id@revision` form if a revision is explicitly tracked
+- canonical model key
 
 ### Lineage
 
@@ -208,6 +223,7 @@ Suggested column groups:
 
 - primary type bucket
 - secondary type tags
+- loader scenario class
 - architecture family
 - `is_merge`
 - `is_adapter`
@@ -252,6 +268,40 @@ Suggested column groups:
 - aggregate score columns
 
 Experiments should eventually read from this canonical table or from small derived views produced from it.
+
+## Duplicate Handling
+
+Phase 2 should treat duplicate handling as a first-class curation step.
+
+This is already necessary because the current `sampled_leaderboard.csv` contains duplicate repo groups, mostly from repeated precision variants or repeated leaderboard rows for the same repo.
+
+### Duplicate Key
+
+The default duplicate key should be:
+
+- normalized repo id
+- plus explicit revision if a revision is intentionally tracked
+
+### Duplicate Policy
+
+1. Exact duplicates
+   - if two rows are identical after normalization, keep one canonical row and preserve the raw source rows separately for provenance
+
+2. Precision-only leaderboard duplicates
+   - if the same repo appears multiple times with different precisions but is still intended to represent one model repo, collapse to one canonical model row
+   - preserve the raw leaderboard variants in a side table or raw enrichment file
+
+3. Conflicting enrichment duplicates
+   - if rows disagree on fields like architecture, type, or parameter count, prefer the more complete and internally consistent row for the canonical table
+   - keep conflict provenance so the disagreement is inspectable later
+
+4. Explicit revision variants
+   - if revisions are intentionally distinguished, they may remain separate canonical rows
+   - if revision is missing or not meant to distinguish separate entries, collapse to the normalized repo-level row
+
+### Raw Provenance Preservation
+
+The canonical table should be accompanied by a preserved raw-enrichment layer or source-row trace so that deduplication does not destroy auditability.
 
 ## Data Sources
 
@@ -299,6 +349,19 @@ The fetchability check should be aligned with the current loader family, which m
 - adapter rows should prefer a resolvable base-model reference when available
 - a repo can be considered `public` but still flagged as `public but structurally incomplete` if it is unlikely to load under the current loader assumptions
 
+This should be expressed with a small `loader_scenario` classification, not with a complex loader system inside phase 2.
+
+Recommended scenarios:
+
+- `standard_transformers`
+- `adapter_requires_base`
+- `quantized_transformers_native`
+- `quantized_alt_format`
+- `multimodal_transformers`
+- `other_or_unknown`
+
+The point of this field is to inform later analysis compatibility, not to execute loading now.
+
 The curation outcome should be:
 
 - `public and likely fetchable`
@@ -306,6 +369,14 @@ The curation outcome should be:
 - `private or deleted`
 - `public but structurally incomplete`
 - `public but probe failed`
+
+For example:
+
+- adapter repos should only be considered strongly fetchable if they expose adapter metadata and a plausible base-model reference
+- AWQ-style repos can often be recognized from `quantization_config.quant_method = "awq"` in config
+- GPTQ repos may require different downstream dependencies than standard repos
+- GGUF repos may be public and usable later, but should be marked as a separate loader scenario rather than treated as plain Transformers repos
+- multimodal repos may require a processor and a different model class, so they should not be silently treated as standard text-only causal LM repos
 
 This is enough for curation. The full download-and-analysis process belongs to a later phase and is intentionally out of scope here.
 
