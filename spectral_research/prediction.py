@@ -174,6 +174,40 @@ def _weighted_mean(scored_neighbors: list[tuple[float, float]]) -> float:
     return float(np.average(values, weights=weights))
 
 
+def build_pairwise_score_matrix(
+    frame: pd.DataFrame,
+    records_by_model_id: dict[str, AlphaRecord],
+    *,
+    method: str = "pl_alpha_scalar",
+    backend: str = "cpu",
+) -> tuple[np.ndarray, dict[str, int]]:
+    if backend != "cpu":
+        raise NotImplementedError("Only the CPU pairwise score matrix backend is supported")
+
+    model_ids = [str(model_id) for model_id in frame["model_id"]]
+    model_index = {model_id: index for index, model_id in enumerate(model_ids)}
+    matrix = np.full((len(model_ids), len(model_ids)), np.nan, dtype=float)
+    structural_vectors = structural_basics_feature_map(frame)
+
+    for left_index, left_model_id in enumerate(model_ids):
+        left_row = frame.iloc[left_index]
+        left_record = records_by_model_id.get(left_model_id)
+        for right_index in range(left_index, len(model_ids)):
+            right_model_id = model_ids[right_index]
+            score = _pair_score(
+                method=method,
+                left_row=left_row,
+                right_row=frame.iloc[right_index],
+                left_record=left_record,
+                right_record=records_by_model_id.get(right_model_id),
+                structural_vectors=structural_vectors,
+            )
+            matrix[left_index, right_index] = score
+            matrix[right_index, left_index] = score
+
+    return matrix, model_index
+
+
 def structural_baseline_oof(
     frame: pd.DataFrame, *, target: str, cv_splits: int = 5
 ) -> pd.DataFrame:
@@ -213,6 +247,9 @@ def neighborhood_predict_oof(
     k: int,
     weighted: bool,
     residualize: bool,
+    pairwise_scores: np.ndarray | None = None,
+    model_index: dict[str, int] | None = None,
+    baseline_by_model_id: dict[str, float] | None = None,
     cv_splits: int = 5,
 ) -> pd.DataFrame:
     out = frame[["model_id", "query_bucket", target]].copy()
@@ -223,15 +260,16 @@ def neighborhood_predict_oof(
         return out
 
     structural_vectors = structural_basics_feature_map(frame)
-    baseline = structural_baseline_oof(frame, target=target, cv_splits=cv_splits)
-    baseline_by_model_id = {
-        str(model_id): float(prediction)
-        for model_id, prediction in zip(
-            baseline["model_id"],
-            baseline["baseline_prediction"],
-            strict=False,
-        )
-    }
+    if baseline_by_model_id is None:
+        baseline = structural_baseline_oof(frame, target=target, cv_splits=cv_splits)
+        baseline_by_model_id = {
+            str(model_id): float(prediction)
+            for model_id, prediction in zip(
+                baseline["model_id"],
+                baseline["baseline_prediction"],
+                strict=False,
+            )
+        }
     target_by_model_id = {
         str(model_id): float(value)
         for model_id, value in zip(frame["model_id"], frame[target], strict=False)
@@ -263,14 +301,21 @@ def neighborhood_predict_oof(
                 train_model_id = str(train_row.model_id)
                 if train_model_id == test_model_id:
                     continue
-                score = _pair_score(
-                    method=method,
-                    left_row=test_row,
-                    right_row=pd.Series(train_row._asdict()),
-                    left_record=test_record,
-                    right_record=records_by_model_id.get(train_model_id),
-                    structural_vectors=structural_vectors,
-                )
+                score = np.nan
+                if pairwise_scores is not None and model_index is not None:
+                    left_index = model_index.get(test_model_id)
+                    right_index = model_index.get(train_model_id)
+                    if left_index is not None and right_index is not None:
+                        score = float(pairwise_scores[left_index, right_index])
+                if not np.isfinite(score):
+                    score = _pair_score(
+                        method=method,
+                        left_row=test_row,
+                        right_row=pd.Series(train_row._asdict()),
+                        left_record=test_record,
+                        right_record=records_by_model_id.get(train_model_id),
+                        structural_vectors=structural_vectors,
+                    )
                 if not np.isfinite(score):
                     continue
                 scored_neighbors.append((float(score), working_target_by_model_id[train_model_id]))
