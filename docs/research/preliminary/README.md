@@ -4,6 +4,7 @@ Start here for the current preliminary phase.
 
 Core documents:
 
+- [Phase 1 Wrap-Up](./phase-1-wrap-up.md)
 - [Research Draft](./preliminary-research-draft.md)
 - [Findings](./preliminary-findings.md)
 - [Paper Outline](./preliminary-paper-outline.md)
