@@ -1,0 +1,145 @@
+analysis,bucket,target,feature,control_mode,n,spearman,r2,mae
+absolute,all_scored,Average ⬆️,trend_global_mean,raw,374,0.11578811003645041,0.005514683459505454,6.04703333544112
+absolute,all_scored,MMLU-PRO,trend_global_mean,raw,374,0.038483217799398256,0.0009370032332051137,7.438101111228177
+absolute,all_scored,MATH Lvl 5,trend_global_mean,raw,374,0.2448169768791339,0.007429870249369919,10.691181971200145
+absolute,all_scored,Average ⬆️,trend_global_start,raw,374,0.14393833606352788,0.003318095904020102,6.053300575205473
+absolute,all_scored,MMLU-PRO,trend_global_start,raw,374,0.05841787751352473,0.00012290014048399467,7.455441428338904
+absolute,all_scored,MATH Lvl 5,trend_global_start,raw,374,0.4533677200295854,0.027886503479600533,10.55477698014948
+absolute,all_scored,Average ⬆️,trend_global_end,raw,374,0.073424304214644,0.00189576310484052,6.062192229301656
+absolute,all_scored,MMLU-PRO,trend_global_end,raw,374,0.024948956925170674,1.409834416654654e-06,7.4583622175604125
+absolute,all_scored,MATH Lvl 5,trend_global_end,raw,374,0.10538221234614345,0.0003208296635033303,10.721903353311554
+absolute,all_scored,Average ⬆️,trend_global_end_minus_start,raw,374,-0.13170945373330134,0.0007020502782476568,6.089309086462008
+absolute,all_scored,MMLU-PRO,trend_global_end_minus_start,raw,374,-0.09066748833337174,0.000303156236873825,7.467937709101901
+absolute,all_scored,MATH Lvl 5,trend_global_end_minus_start,raw,374,-0.3896170457714134,0.06876388887047202,10.369694160228041
+absolute,all_scored,Average ⬆️,trend_global_mean,structural_adjusted,374,0.11578811003645041,0.18004560710979034,5.671504972187583
+absolute,all_scored,MMLU-PRO,trend_global_mean,structural_adjusted,374,0.038483217799398256,0.2837585954550187,6.5530142184767675
+absolute,all_scored,MATH Lvl 5,trend_global_mean,structural_adjusted,374,0.2448169768791339,0.07972516896773851,10.299171986707313
+absolute,all_scored,Average ⬆️,trend_global_start,structural_adjusted,374,0.14393833606352788,0.17386678795695876,5.671441519280158
+absolute,all_scored,MMLU-PRO,trend_global_start,structural_adjusted,374,0.05841787751352473,0.28172318218677284,6.523041085371186
+absolute,all_scored,MATH Lvl 5,trend_global_start,structural_adjusted,374,0.4533677200295854,0.1232709573805415,9.996143597828233
+absolute,all_scored,Average ⬆️,trend_global_end,structural_adjusted,374,0.073424304214644,0.16883171414524,5.662530004572915
+absolute,all_scored,MMLU-PRO,trend_global_end,structural_adjusted,374,0.024948956925170674,0.27851874611705585,6.5048275565297295
+absolute,all_scored,MATH Lvl 5,trend_global_end,structural_adjusted,374,0.10538221234614345,0.033898310442898594,10.488586761471298
+absolute,all_scored,Average ⬆️,trend_global_end_minus_start,structural_adjusted,374,-0.13170945373330134,0.16622811743398158,5.685724292841893
+absolute,all_scored,MMLU-PRO,trend_global_end_minus_start,structural_adjusted,374,-0.09066748833337174,0.27817870303032977,6.524774639849558
+absolute,all_scored,MATH Lvl 5,trend_global_end_minus_start,structural_adjusted,374,-0.3896170457714134,0.10818833195492983,10.115290808221202
+absolute,heterogeneous,Average ⬆️,trend_global_mean,raw,21,0.14935064935064934,0.2412304971443915,3.0466402839974416
+absolute,heterogeneous,MMLU-PRO,trend_global_mean,raw,21,-0.24935064935064938,0.11289316312600306,3.240237692353773
+absolute,heterogeneous,MATH Lvl 5,trend_global_mean,raw,21,0.17662337662337665,0.014480555099748549,6.21061584756525
+absolute,heterogeneous,Average ⬆️,trend_global_start,raw,21,0.3571428571428571,0.1531445291190483,3.114478061650012
+absolute,heterogeneous,MMLU-PRO,trend_global_start,raw,21,-0.17142857142857143,0.07291968975713525,3.2723961025863253
+absolute,heterogeneous,MATH Lvl 5,trend_global_start,raw,21,0.461038961038961,0.02284894634030077,6.256125149510072
+absolute,heterogeneous,Average ⬆️,trend_global_end,raw,21,0.15064935064935067,0.25668861114445685,2.9276049915696403
+absolute,heterogeneous,MMLU-PRO,trend_global_end,raw,21,-0.12337662337662336,0.090198083358214,3.3321266596835994
+absolute,heterogeneous,MATH Lvl 5,trend_global_end,raw,21,0.274025974025974,0.027749082376250622,6.103653892543046
+absolute,heterogeneous,Average ⬆️,trend_global_end_minus_start,raw,21,0.15324675324675324,0.08887301699598116,3.280914210302315
+absolute,heterogeneous,MMLU-PRO,trend_global_end_minus_start,raw,21,0.5025974025974026,0.014001565000555494,3.4734331758293773
+absolute,heterogeneous,MATH Lvl 5,trend_global_end_minus_start,raw,21,-0.22077922077922077,0.004033969236945212,6.272738830986327
+absolute,heterogeneous,Average ⬆️,trend_global_mean,structural_adjusted,21,0.14935064935064934,0.3238219461952637,2.5004569330888966
+absolute,heterogeneous,MMLU-PRO,trend_global_mean,structural_adjusted,21,-0.24935064935064938,0.22253699185544062,2.5440048940768842
+absolute,heterogeneous,MATH Lvl 5,trend_global_mean,structural_adjusted,21,0.17662337662337665,0.40061406781740583,4.25211765487988
+absolute,heterogeneous,Average ⬆️,trend_global_start,structural_adjusted,21,0.3571428571428571,0.31930598112118314,2.593911105433576
+absolute,heterogeneous,MMLU-PRO,trend_global_start,structural_adjusted,21,-0.17142857142857143,0.22066495354425852,2.687882500768391
+absolute,heterogeneous,MATH Lvl 5,trend_global_start,structural_adjusted,21,0.461038961038961,0.3944822894117117,4.429436480377488
+absolute,heterogeneous,Average ⬆️,trend_global_end,structural_adjusted,21,0.15064935064935067,0.3205197754797027,2.5548497436376
+absolute,heterogeneous,MMLU-PRO,trend_global_end,structural_adjusted,21,-0.12337662337662336,0.2189367613743024,2.61861114218251
+absolute,heterogeneous,MATH Lvl 5,trend_global_end,structural_adjusted,21,0.274025974025974,0.39776067839209495,4.338388994826407
+absolute,heterogeneous,Average ⬆️,trend_global_end_minus_start,structural_adjusted,21,0.15324675324675324,0.32025807730476896,2.611692688692293
+absolute,heterogeneous,MMLU-PRO,trend_global_end_minus_start,structural_adjusted,21,0.5025974025974026,0.22603116428099645,2.6846533126551435
+absolute,heterogeneous,MATH Lvl 5,trend_global_end_minus_start,structural_adjusted,21,-0.22077922077922077,0.3793007291426944,4.621298288593513
+exact_parent,all_scored,Average ⬆️_delta,trend_global_mean_delta,raw,71,-0.014956405097250167,0.06801160761877978,3.6698516690666483
+exact_parent,all_scored,MMLU-PRO_delta,trend_global_mean_delta,raw,71,0.06753856472166331,0.02441710223459248,3.0690220437942455
+exact_parent,all_scored,MATH Lvl 5_delta,trend_global_mean_delta,raw,71,0.06295172179604387,0.03686083664719075,6.350934396739156
+exact_parent,all_scored,Average ⬆️_delta,trend_global_start_delta,raw,71,0.09416498993963782,0.0037661453385993138,3.658637183707626
+exact_parent,all_scored,MMLU-PRO_delta,trend_global_start_delta,raw,71,0.2655935613682092,6.845020905643651e-07,3.1249299425300157
+exact_parent,all_scored,MATH Lvl 5_delta,trend_global_start_delta,raw,71,0.14388006739745776,0.0014990998415927992,6.3878735574602485
+exact_parent,all_scored,Average ⬆️_delta,trend_global_end_delta,raw,71,0.053588195841716965,0.005702534491176525,3.6699307186619916
+exact_parent,all_scored,MMLU-PRO_delta,trend_global_end_delta,raw,71,0.1300469483568075,0.005351740636336144,3.1355973885294603
+exact_parent,all_scored,MATH Lvl 5_delta,trend_global_end_delta,raw,71,0.09112404268505658,0.0038308024061873835,6.3541326364934365
+exact_parent,all_scored,Average ⬆️_delta,trend_global_end_minus_start_delta,raw,71,0.11160295103957076,1.1466721671071767e-06,3.6432085035518713
+exact_parent,all_scored,MMLU-PRO_delta,trend_global_end_minus_start_delta,raw,71,-0.06478873239436618,0.001048816228982452,3.1241814901591702
+exact_parent,all_scored,MATH Lvl 5_delta,trend_global_end_minus_start_delta,raw,71,0.039038787517631894,3.277320302874642e-05,6.334893698571829
+exact_parent,all_scored,Average ⬆️_delta,trend_global_mean_delta,structural_adjusted,71,-0.014956405097250167,0.13245928577555377,3.457747839268289
+exact_parent,all_scored,MMLU-PRO_delta,trend_global_mean_delta,structural_adjusted,71,0.06753856472166331,0.08275764165183042,2.9179668650463664
+exact_parent,all_scored,MATH Lvl 5_delta,trend_global_mean_delta,structural_adjusted,71,0.06295172179604387,0.08081441862487238,6.004844068912341
+exact_parent,all_scored,Average ⬆️_delta,trend_global_start_delta,structural_adjusted,71,0.09416498993963782,0.14661812914906225,3.4376401182100524
+exact_parent,all_scored,MMLU-PRO_delta,trend_global_start_delta,structural_adjusted,71,0.2655935613682092,0.07937878441423918,2.858758646954708
+exact_parent,all_scored,MATH Lvl 5_delta,trend_global_start_delta,structural_adjusted,71,0.14388006739745776,0.11361839415261565,5.8601429481686935
+exact_parent,all_scored,Average ⬆️_delta,trend_global_end_delta,structural_adjusted,71,0.053588195841716965,0.18329295649648902,3.340987628478134
+exact_parent,all_scored,MMLU-PRO_delta,trend_global_end_delta,structural_adjusted,71,0.1300469483568075,0.10115705556515298,2.839714625653884
+exact_parent,all_scored,MATH Lvl 5_delta,trend_global_end_delta,structural_adjusted,71,0.09112404268505658,0.0931980971780273,5.824946320803631
+exact_parent,all_scored,Average ⬆️_delta,trend_global_end_minus_start_delta,structural_adjusted,71,0.11160295103957076,0.09553839870043512,3.4736749155673317
+exact_parent,all_scored,MMLU-PRO_delta,trend_global_end_minus_start_delta,structural_adjusted,71,-0.06478873239436618,0.08521822256846545,2.9786446503789854
+exact_parent,all_scored,MATH Lvl 5_delta,trend_global_end_minus_start_delta,structural_adjusted,71,0.039038787517631894,0.04428507714544794,5.944016422862162
+exact_parent,heterogeneous,Average ⬆️_delta,trend_global_mean_delta,raw,12,-0.7482517482517484,0.09459776180311152,4.017625362757635
+exact_parent,heterogeneous,MMLU-PRO_delta,trend_global_mean_delta,raw,12,-0.09090909090909093,0.03573631181054626,1.8162405363691587
+exact_parent,heterogeneous,MATH Lvl 5_delta,trend_global_mean_delta,raw,12,-0.7902097902097903,0.028904813124468354,9.878306828954146
+exact_parent,heterogeneous,Average ⬆️_delta,trend_global_start_delta,raw,12,0.1188811188811189,0.04629417568326266,4.007035294849428
+exact_parent,heterogeneous,MMLU-PRO_delta,trend_global_start_delta,raw,12,0.2797202797202798,0.03737211033896082,1.808770489336915
+exact_parent,heterogeneous,MATH Lvl 5_delta,trend_global_start_delta,raw,12,-0.013986013986013986,0.004413042554822777,9.690688726107846
+exact_parent,heterogeneous,Average ⬆️_delta,trend_global_end_delta,raw,12,-0.6013986013986015,0.04307150740025578,4.006021062053294
+exact_parent,heterogeneous,MMLU-PRO_delta,trend_global_end_delta,raw,12,0.2517482517482518,0.0298649308257235,1.8022042838814738
+exact_parent,heterogeneous,MATH Lvl 5_delta,trend_global_end_delta,raw,12,-0.6923076923076924,0.004160397785834213,9.691120391642833
+exact_parent,heterogeneous,Average ⬆️_delta,trend_global_end_minus_start_delta,raw,12,-0.15384615384615385,0.04489731240564099,4.006697982804448
+exact_parent,heterogeneous,MMLU-PRO_delta,trend_global_end_minus_start_delta,raw,12,-0.35664335664335667,0.03402749635810842,1.8058584469649468
+exact_parent,heterogeneous,MATH Lvl 5_delta,trend_global_end_minus_start_delta,raw,12,-0.006993006993006993,0.0043039680838108385,9.690979773944873
+exact_parent,heterogeneous,Average ⬆️_delta,trend_global_mean_delta,structural_adjusted,12,-0.7482517482517484,0.8696152715606152,1.3673327082089963
+exact_parent,heterogeneous,MMLU-PRO_delta,trend_global_mean_delta,structural_adjusted,12,-0.09090909090909093,0.2815408944945472,1.72965980572593
+exact_parent,heterogeneous,MATH Lvl 5_delta,trend_global_mean_delta,structural_adjusted,12,-0.7902097902097903,0.761211716093851,4.971009492320057
+exact_parent,heterogeneous,Average ⬆️_delta,trend_global_start_delta,structural_adjusted,12,0.1188811188811189,0.24244647975405764,3.504624770170226
+exact_parent,heterogeneous,MMLU-PRO_delta,trend_global_start_delta,structural_adjusted,12,0.2797202797202798,0.6463666491117741,1.1355634610434384
+exact_parent,heterogeneous,MATH Lvl 5_delta,trend_global_start_delta,structural_adjusted,12,-0.013986013986013986,0.052475339480856587,9.107352341559613
+exact_parent,heterogeneous,Average ⬆️_delta,trend_global_end_delta,structural_adjusted,12,-0.6013986013986015,0.526950748992405,2.545604327342853
+exact_parent,heterogeneous,MMLU-PRO_delta,trend_global_end_delta,structural_adjusted,12,0.2517482517482518,0.2652177467962923,1.4979792709151243
+exact_parent,heterogeneous,MATH Lvl 5_delta,trend_global_end_delta,structural_adjusted,12,-0.6923076923076924,0.5135639204780587,6.709223413887344
+exact_parent,heterogeneous,Average ⬆️_delta,trend_global_end_minus_start_delta,structural_adjusted,12,-0.15384615384615385,0.2704205579502005,3.3815356046179015
+exact_parent,heterogeneous,MMLU-PRO_delta,trend_global_end_minus_start_delta,structural_adjusted,12,-0.35664335664335667,0.6280889161859675,1.2045724341518567
+exact_parent,heterogeneous,MATH Lvl 5_delta,trend_global_end_minus_start_delta,structural_adjusted,12,-0.006993006993006993,0.06734502600704317,8.859600922644132
+family_relative,all_scored,Average ⬆️_delta,trend_global_mean_delta,raw,155,0.06982923180106279,0.2112237545840393,2.5812310767713114
+family_relative,all_scored,MMLU-PRO_delta,trend_global_mean_delta,raw,155,0.03472768033132043,0.16910919416660275,2.1738036650193626
+family_relative,all_scored,MATH Lvl 5_delta,trend_global_mean_delta,raw,155,-0.007857732104326389,0.16164615355830325,3.478027439781836
+family_relative,all_scored,Average ⬆️_delta,trend_global_start_delta,raw,155,0.15106484048903668,0.005153346112660606,2.8212808302632024
+family_relative,all_scored,MMLU-PRO_delta,trend_global_start_delta,raw,155,0.15320641951200176,0.002443928327865108,2.2816197084935412
+family_relative,all_scored,MATH Lvl 5_delta,trend_global_start_delta,raw,155,0.051801460609610814,0.004592465569014492,3.6058229295270117
+family_relative,all_scored,Average ⬆️_delta,trend_global_end_delta,raw,155,0.0785362391173258,0.01112179869442631,2.8237769701470365
+family_relative,all_scored,MMLU-PRO_delta,trend_global_end_delta,raw,155,0.05966537101706614,0.006613900797785899,2.2818294489565196
+family_relative,all_scored,MATH Lvl 5_delta,trend_global_end_delta,raw,155,0.08971259882959186,0.008174934247166976,3.5913591286517095
+family_relative,all_scored,Average ⬆️_delta,trend_global_end_minus_start_delta,raw,155,-0.022776138162790123,3.7160276113779034e-05,2.799173452080409
+family_relative,all_scored,MMLU-PRO_delta,trend_global_end_minus_start_delta,raw,155,-0.03185861548239994,0.00012543559582400832,2.2725647032760157
+family_relative,all_scored,MATH Lvl 5_delta,trend_global_end_minus_start_delta,raw,155,0.03355947687808564,2.8378989603283777e-05,3.5613274438731084
+family_relative,all_scored,Average ⬆️_delta,trend_global_mean_delta,structural_adjusted,155,0.06982923180106279,0.21688124917338447,2.5932151659940414
+family_relative,all_scored,MMLU-PRO_delta,trend_global_mean_delta,structural_adjusted,155,0.03472768033132043,0.1725479295271195,2.1781707024824506
+family_relative,all_scored,MATH Lvl 5_delta,trend_global_mean_delta,structural_adjusted,155,-0.007857732104326389,0.16733624705594707,3.5098806265462223
+family_relative,all_scored,Average ⬆️_delta,trend_global_start_delta,structural_adjusted,155,0.15106484048903668,0.008830151447391188,2.828689607878823
+family_relative,all_scored,MMLU-PRO_delta,trend_global_start_delta,structural_adjusted,155,0.15320641951200176,0.011505795267558239,2.3131684782861175
+family_relative,all_scored,MATH Lvl 5_delta,trend_global_start_delta,structural_adjusted,155,0.051801460609610814,0.01551942774238746,3.6680005727583707
+family_relative,all_scored,Average ⬆️_delta,trend_global_end_delta,structural_adjusted,155,0.0785362391173258,0.014849226993683518,2.8303684828810023
+family_relative,all_scored,MMLU-PRO_delta,trend_global_end_delta,structural_adjusted,155,0.05966537101706614,0.015352634962675915,2.3097903608790484
+family_relative,all_scored,MATH Lvl 5_delta,trend_global_end_delta,structural_adjusted,155,0.08971259882959186,0.01882275572963854,3.6536102044515246
+family_relative,all_scored,Average ⬆️_delta,trend_global_end_minus_start_delta,structural_adjusted,155,-0.022776138162790123,0.00367062483462377,2.805093073106637
+family_relative,all_scored,MMLU-PRO_delta,trend_global_end_minus_start_delta,structural_adjusted,155,-0.03185861548239994,0.009152862542318507,2.3014822470703304
+family_relative,all_scored,MATH Lvl 5_delta,trend_global_end_minus_start_delta,structural_adjusted,155,0.03355947687808564,0.01089312322415259,3.629675895115227
+family_relative,heterogeneous,Average ⬆️_delta,trend_global_mean_delta,raw,18,-0.11042311661506708,0.0008980024152732691,2.3031981744262726
+family_relative,heterogeneous,MMLU-PRO_delta,trend_global_mean_delta,raw,18,-0.4674922600619195,0.046941624762645295,1.1166783072904145
+family_relative,heterogeneous,MATH Lvl 5_delta,trend_global_mean_delta,raw,18,-0.27554179566563464,0.004594279653695077,4.781127807422087
+family_relative,heterogeneous,Average ⬆️_delta,trend_global_start_delta,raw,18,0.6780185758513931,0.003876493485127752,2.2874131033804086
+family_relative,heterogeneous,MMLU-PRO_delta,trend_global_start_delta,raw,18,-0.17027863777089783,0.0021947360833386442,1.1429040846296945
+family_relative,heterogeneous,MATH Lvl 5_delta,trend_global_start_delta,raw,18,0.44272445820433437,0.00029557905220356506,4.796662274211743
+family_relative,heterogeneous,Average ⬆️_delta,trend_global_end_delta,raw,18,-0.37254901960784315,0.00011261363813586112,2.294568677355953
+family_relative,heterogeneous,MMLU-PRO_delta,trend_global_end_delta,raw,18,0.08978328173374613,0.001245844557258291,1.142864211173694
+family_relative,heterogeneous,MATH Lvl 5_delta,trend_global_end_delta,raw,18,-0.1867905056759546,0.0002148888139258398,4.753363501641499
+family_relative,heterogeneous,Average ⬆️_delta,trend_global_end_minus_start_delta,raw,18,-0.7254901960784313,0.001597138027476186,2.2920998132922983
+family_relative,heterogeneous,MMLU-PRO_delta,trend_global_end_minus_start_delta,raw,18,-0.11042311661506708,0.001756114524747776,1.1428690176279113
+family_relative,heterogeneous,MATH Lvl 5_delta,trend_global_end_minus_start_delta,raw,18,-0.5067079463364293,1.1835747915744932e-05,4.767887446460286
+family_relative,heterogeneous,Average ⬆️_delta,trend_global_mean_delta,structural_adjusted,18,-0.11042311661506708,0.05026305348807458,2.339466877009479
+family_relative,heterogeneous,MMLU-PRO_delta,trend_global_mean_delta,structural_adjusted,18,-0.4674922600619195,0.04766816344248892,1.1123177337900216
+family_relative,heterogeneous,MATH Lvl 5_delta,trend_global_mean_delta,structural_adjusted,18,-0.27554179566563464,0.006389672363813936,4.78506106120847
+family_relative,heterogeneous,Average ⬆️_delta,trend_global_start_delta,structural_adjusted,18,0.6780185758513931,0.04892656962417674,2.3627985777877214
+family_relative,heterogeneous,MMLU-PRO_delta,trend_global_start_delta,structural_adjusted,18,-0.17027863777089783,0.013065290388569184,1.1562997924175382
+family_relative,heterogeneous,MATH Lvl 5_delta,trend_global_start_delta,structural_adjusted,18,0.44272445820433437,0.004211069117448063,4.783229806016237
+family_relative,heterogeneous,Average ⬆️_delta,trend_global_end_delta,structural_adjusted,18,-0.37254901960784315,0.0458769178831121,2.345214001692647
+family_relative,heterogeneous,MMLU-PRO_delta,trend_global_end_delta,structural_adjusted,18,0.08978328173374613,0.011873408893355974,1.1560181424987677
+family_relative,heterogeneous,MATH Lvl 5_delta,trend_global_end_delta,structural_adjusted,18,-0.1867905056759546,0.004193638312708026,4.770341669116906
+family_relative,heterogeneous,Average ⬆️_delta,trend_global_end_minus_start_delta,structural_adjusted,18,-0.7254901960784313,0.0471375577894656,2.3471098047555374
+family_relative,heterogeneous,MMLU-PRO_delta,trend_global_end_minus_start_delta,structural_adjusted,18,-0.11042311661506708,0.01249920320135256,1.156127481395642
+family_relative,heterogeneous,MATH Lvl 5_delta,trend_global_end_minus_start_delta,structural_adjusted,18,-0.5067079463364293,0.003941503937400004,4.768251946841383

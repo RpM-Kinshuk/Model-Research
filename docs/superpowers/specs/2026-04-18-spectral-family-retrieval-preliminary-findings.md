@@ -503,6 +503,18 @@ Compared with Cycle 1, the heterogeneous slice changed only partially:
 - on the stronger `supported_candidate` and `unsupported_special` slices for `MMLU-PRO` and `MATH Lvl 5`, `full_module_trace` stayed best in Cycle 2, so the routed method did not produce a clear regression there
 - outside the main emphasis, `schema_routed_trace` did become the best `MMLU-PRO` row on `unsupported_unknown`, improving the best R² from `0.584` in Cycle 1 to `0.602` in Cycle 2
 
+## Performance Trend Diagnostics
+
+Outputs: [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/report.md), [absolute_trend_dataset.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/absolute_trend_dataset.csv), [exact_parent_delta_dataset.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/exact_parent_delta_dataset.csv), [family_relative_delta_dataset.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/family_relative_delta_dataset.csv), [trend_results.csv](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/trend_results.csv).
+
+The strongest absolute-trend row was `MATH Lvl 5` on the heterogeneous slice with `trend_global_mean` under structural control (`R² 0.401`, `Spearman 0.177`, `n=21`); `MMLU-PRO` peaked lower at `R² 0.284`.
+
+Exact-parent deltas had some clean support, but only on a very small heterogeneous slice (`n=12`), while the larger all-scored rows stayed weak (`R²` around `0.10` to `0.11`), so they are not yet a stable signal.
+
+Family-relative deltas were broader, but the effect is still noisy: the best all-scored rows reached only modest `R²` values around `0.17` to `0.21`, and the heterogeneous slice remained small and unstable.
+
+Trend-style signals are worth carrying forward only as a secondary feature family; the absolute-trend rows look modestly useful, but the delta-style rows are not strong enough yet to drive later prediction work.
+
 ## What We Can Claim Now
 
 We can claim this:
