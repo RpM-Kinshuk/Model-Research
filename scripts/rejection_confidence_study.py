@@ -37,26 +37,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run the rejection confidence mini-study on the strict family benchmark."
     )
-    parser.add_argument("--metrics-dir", type=Path, default=Path("svd_results/metrics"))
+    parser.add_argument("--metrics-dir", type=Path, default=REPO_ROOT / "svd_results")
     parser.add_argument(
         "--lineage-csv",
         type=Path,
-        default=Path("data/sampled_metadata.csv"),
+        default=REPO_ROOT / "data" / "sampled_metadata.csv",
     )
     parser.add_argument(
         "--leaderboard-csv",
         type=Path,
-        default=Path("data/OpenLLMLeaderboard2.csv"),
+        default=REPO_ROOT / "data" / "sampled_leaderboard.csv",
     )
     parser.add_argument(
         "--freeze-csv",
         type=Path,
-        default=Path("data/manual_audits/spectral_family_retrieval_label_freeze.csv"),
+        default=REPO_ROOT / "data" / "manual_audits" / "spectral_family_retrieval_label_freeze.csv",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("research_runs/preliminary/rejection/rejection_confidence_study_strict_v1"),
+        default=REPO_ROOT
+        / "research_runs"
+        / "preliminary"
+        / "rejection"
+        / "rejection_confidence_study_strict_v1",
     )
     parser.add_argument("--min-family-size", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
@@ -86,12 +90,7 @@ def _build_state(args: argparse.Namespace) -> dict[str, object]:
     records = load_alpha_records(args.metrics_dir)
     records_frame = _records_frame(records)
     metadata_frame = _read_csv(args.lineage_csv)
-    leaderboard_csv = args.leaderboard_csv
-    if not leaderboard_csv.exists():
-        fallback = Path("data/sampled_leaderboard.csv")
-        if fallback.exists():
-            leaderboard_csv = fallback
-    leaderboard_frame = _read_csv(leaderboard_csv)
+    leaderboard_frame = _read_csv(args.leaderboard_csv)
     overrides_frame = _read_csv(args.freeze_csv, columns=OVERRIDE_COLUMNS)
 
     audited_manifest = build_audit_manifest(

@@ -24,8 +24,6 @@ This directory keeps both the current canonical experiment CLIs and a small set 
 
 ## Preserved exploratory or legacy helpers
 
-- `spectral_family_retrieval_cli.py`
-  - Preserved legacy helper output: `research_runs/preliminary/retrieval/spectral_family_retrieval`
 - `spectral_similarity_research.py`
 - `alpha_leaderboard_correlation.py`
 - `alpha_near_two_hypothesis_check.py`
