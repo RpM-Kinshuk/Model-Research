@@ -43,10 +43,13 @@ The next phase should fix those issues while preserving the current sample and t
    - Adjacent categories like `MoE`, `multimodal`, `adapter`, and `quantized` should be represented, but not allowed to dominate the zoo.
 
 5. Track candidate vs available vs analysis-ready explicitly.
-   - A curated model is not the same thing as a downloaded model.
+   - A curated model is not the same thing as a fetchable model, and a fetchable model is not the same thing as an analysis-ready model.
 
 6. Prefer recovery over unnecessary resampling.
    - If a model is still public on the Hub, phase 2 should try to recover it before replacing it.
+
+7. Keep curation lightweight on disk.
+   - Phase 2 curation should not persistently download large model weights just to test availability.
 
 ## Current Baseline
 
@@ -97,9 +100,14 @@ Phase 2 should distinguish two levels clearly:
    - target size: about `15,000`
 
 2. `analysis-ready zoo`
-   - the subset of the candidate zoo that is successfully fetched, processed, and ready for experiments
+   - the subset of the candidate zoo that has already been successfully processed and is ready for experiments
 
-This split is important because the current failure pattern is not just sampling error. A large share of missing analysis rows appear to still exist publicly and should be recoverable.
+Between those two, phase 2 should also track a lighter state:
+
+- `fetchable`
+  - models that appear accessible and analyzable based on lightweight Hub checks, without a full persistent download
+
+This split is important because the current failure pattern is not just sampling error. A large share of missing analysis rows appear to still exist publicly and should be recoverable, but curation cannot keep all of them downloaded locally.
 
 ### Lineage Balance
 
@@ -208,6 +216,8 @@ Suggested column groups:
 
 - hub availability status
 - gated/private/deleted/public flags
+- lightweight fetchability probe status
+- weight-manifest presence status
 - last checked timestamp
 - failure class
 - retry eligibility
@@ -222,7 +232,7 @@ Suggested column groups:
 
 ### Analysis Status
 
-- downloaded locally
+- analysis artifact already present
 - spectral analysis complete
 - local analysis artifact path
 - schema name
@@ -260,6 +270,32 @@ Phase 2 should use four source layers.
    - Open LLM Leaderboard dataset
 
 The existing data should be ingested first. Live collection should then extend and repair it.
+
+## Lightweight Fetchability Checks
+
+Phase 2 curation should not perform full persistent downloads of model weights.
+
+Instead, it should use lightweight Hub checks to estimate whether a model is likely analyzable later by the batch analysis runner.
+
+Recommended lightweight checks:
+
+- `repo_exists` or equivalent repo visibility check
+- `model_info` for access state and core metadata
+- `list_repo_files` or equivalent file listing
+- existence of key files such as:
+  - `config.json`
+  - safetensor or weight index files when present
+- optional dry-run file probe for small files only
+
+The curation outcome should be:
+
+- `public and likely fetchable`
+- `gated`
+- `private or deleted`
+- `public but structurally incomplete`
+- `public but probe failed`
+
+This is enough for curation. The full download should remain part of the later spectral-analysis runner, which can keep the current behavior of downloading a few models in parallel, analyzing them, recording outputs, and deleting local weights afterward.
 
 ## Collection Pipeline
 
@@ -310,12 +346,23 @@ This stage should not decide sampling by itself. It should add information to al
 
 Attempt to recover analysis-ready coverage using explicit status tracking.
 
+This stage should be split conceptually into:
+
+1. `preflight recovery`
+   - lightweight Hub/API probes only
+   - no persistent full-weight download
+
+2. `analysis runner handoff`
+   - batch download, analyze, and delete
+   - record success or failure back into the canonical table
+
 Track failures as classes such as:
 
 - `public_fetch_failed`
 - `gated`
 - `private_or_deleted`
 - `config_missing`
+- `weight_manifest_missing`
 - `download_timeout`
 - `analysis_failed`
 
@@ -390,7 +437,7 @@ Phase 2 is successful if it produces:
 
 1. one canonical model table that replaces the current multi-file join pattern
 2. a curated zoo of about `15,000` models
-3. explicit availability and recovery status per model
+3. explicit availability, fetchability, and recovery status per model
 4. better representation of adjacent categories without letting them dominate
 5. better eval enrichment for downstream prediction work
 6. a clean handoff into the same experiment family used in phase 1
@@ -417,7 +464,7 @@ The simplest good strategy is:
 - preserve current analysis results and eval matches
 - expand to `15,000` with soft type floors and caps
 - maintain a majority of known-lineage rows with a meaningful unknown minority
-- track availability and failure states explicitly
+- track availability, lightweight fetchability, and failure states explicitly
 - use leaderboard data as enrichment for prediction, not as the main curator
 
 That gives us a larger zoo without abandoning the preliminary study structure that already worked.
