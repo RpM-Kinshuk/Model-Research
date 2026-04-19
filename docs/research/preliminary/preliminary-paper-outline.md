@@ -102,8 +102,8 @@ That preserves the main research direction: zoo management first, heterogeneous 
 
 ## Canonical Supporting Artifacts
 
-- Consolidated findings: [2026-04-18-spectral-family-retrieval-preliminary-findings.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/docs/superpowers/specs/2026-04-18-spectral-family-retrieval-preliminary-findings.md)
-- Strict control benchmark: [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/spectral_family_retrieval_strict_headline_v2/report.md)
-- Lean mixed-zoo benchmark: [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/lean_mixed_zoo_benchmark/report.md)
-- Prediction Cycle 2: [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_prediction_cycle2/report.md)
-- Trend diagnostics: [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/report.md)
+- Consolidated findings: [preliminary-findings.md](./preliminary-findings.md)
+- Strict control benchmark: [report.md](../../../research_runs/spectral_family_retrieval_strict_headline_v2/report.md)
+- Lean mixed-zoo benchmark: [report.md](../../../research_runs/lean_mixed_zoo_benchmark/report.md)
+- Prediction Cycle 2: [report.md](../../../research_runs/performance_prediction_cycle2/report.md)
+- Trend diagnostics: [report.md](../../../research_runs/performance_trend_diagnostics/report.md)

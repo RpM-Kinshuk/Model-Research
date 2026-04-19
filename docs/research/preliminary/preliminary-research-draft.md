@@ -102,15 +102,15 @@ These should remain in the record, but they should not drive the framing.
 The branch now has many artifacts, but the preliminary story should keep referring back to a small canonical set.
 
 - consolidated findings note:
-  [2026-04-18-spectral-family-retrieval-preliminary-findings.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/docs/superpowers/specs/2026-04-18-spectral-family-retrieval-preliminary-findings.md)
+  [preliminary-findings.md](./preliminary-findings.md)
 - strict control benchmark:
-  [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/spectral_family_retrieval_strict_headline_v2/report.md)
+  [report.md](../../../research_runs/spectral_family_retrieval_strict_headline_v2/report.md)
 - lean mixed-zoo benchmark:
-  [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/lean_mixed_zoo_benchmark/report.md)
+  [report.md](../../../research_runs/lean_mixed_zoo_benchmark/report.md)
 - performance prediction follow-up:
-  [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_prediction_cycle2/report.md)
+  [report.md](../../../research_runs/performance_prediction_cycle2/report.md)
 - trend diagnostics:
-  [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_trend_diagnostics/report.md)
+  [report.md](../../../research_runs/performance_trend_diagnostics/report.md)
 
 These are the documents and runs that should anchor the preliminary phase.
 
