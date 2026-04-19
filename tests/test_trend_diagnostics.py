@@ -124,3 +124,130 @@ class TrendDiagnosticsTableTests(unittest.TestCase):
         self.assertEqual(row["family_anchor"], "fam/a")
         self.assertAlmostEqual(float(row["MMLU-PRO_delta"]), 5.0)
         self.assertIn("trend_global_end_minus_start_delta", delta_frame.columns)
+
+    def test_build_absolute_trend_frame_returns_stable_empty_schema_when_no_records_match(self) -> None:
+        dataset = self._dataset().assign(model_id=["missing-a", "missing-b", "missing-c"])
+
+        feature_frame = build_absolute_trend_frame(dataset, self._records())
+
+        self.assertEqual(len(feature_frame), 0)
+        self.assertIn("model_id", feature_frame.columns)
+        self.assertIn("trend_global_mean", feature_frame.columns)
+        self.assertIn("trend_global_end_minus_start", feature_frame.columns)
+
+    def test_build_exact_parent_delta_frame_returns_stable_empty_schema_when_no_pairs_exist(self) -> None:
+        feature_frame = build_absolute_trend_frame(self._dataset(), self._records()).loc[
+            lambda frame: frame["model_id"].eq("parent-a")
+        ]
+
+        delta_frame = build_exact_parent_delta_frame(feature_frame)
+
+        self.assertEqual(len(delta_frame), 0)
+        self.assertIn("parent_model_id", delta_frame.columns)
+        self.assertIn("trend_global_mean_delta", delta_frame.columns)
+        self.assertIn("MATH Lvl 5_delta", delta_frame.columns)
+
+    def test_build_family_relative_delta_frame_normalizes_family_keys_and_uses_public_schema(self) -> None:
+        dataset = pd.DataFrame(
+            [
+                {
+                    "model_id": "family-a-1",
+                    "display_name": "repo/family-a-1",
+                    "source_model": "",
+                    "base_model_relation": "",
+                    "audited_base_family": " fam/a ",
+                    "candidate_family": "",
+                    "query_bucket": "supported_candidate",
+                    "common_schema": True,
+                    "schema_name": "common_llm_7",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "Average ⬆️": 10.0,
+                    "MMLU-PRO": 20.0,
+                    "MATH Lvl 5": 30.0,
+                },
+                {
+                    "model_id": "family-a-2",
+                    "display_name": "repo/family-a-2",
+                    "source_model": "",
+                    "base_model_relation": "",
+                    "audited_base_family": "fam/a",
+                    "candidate_family": "  fam/a  ",
+                    "query_bucket": "supported_candidate",
+                    "common_schema": True,
+                    "schema_name": "common_llm_7",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "Average ⬆️": 14.0,
+                    "MMLU-PRO": 22.0,
+                    "MATH Lvl 5": 34.0,
+                },
+            ]
+        )
+        records = {
+            "family-a-1": AlphaRecord(
+                "family-a-1",
+                "repo/family-a-1",
+                "/tmp/family-a-1",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[1.0, 2.0], [2.0, 4.0]], dtype=float),
+            ),
+            "family-a-2": AlphaRecord(
+                "family-a-2",
+                "repo/family-a-2",
+                "/tmp/family-a-2",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[2.0, 3.0], [4.0, 5.0]], dtype=float),
+            ),
+        }
+
+        feature_frame = build_absolute_trend_frame(dataset, records)
+        delta_frame = build_family_relative_delta_frame(feature_frame)
+
+        self.assertEqual(len(delta_frame), 2)
+        self.assertTrue((delta_frame["family_anchor"] == "fam/a").all())
+        self.assertNotIn("_family_anchor", delta_frame.columns)
+        self.assertIn("trend_global_mean_delta", delta_frame.columns)
+
+    def test_build_family_relative_delta_frame_returns_stable_empty_schema_when_no_usable_family_exists(
+        self,
+    ) -> None:
+        dataset = pd.DataFrame(
+            [
+                {
+                    "model_id": "lonely-a",
+                    "display_name": "repo/lonely-a",
+                    "source_model": "",
+                    "base_model_relation": "",
+                    "audited_base_family": "fam/a",
+                    "candidate_family": "fam/a",
+                    "query_bucket": "supported_candidate",
+                    "common_schema": True,
+                    "schema_name": "common_llm_7",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "Average ⬆️": 10.0,
+                    "MMLU-PRO": 20.0,
+                    "MATH Lvl 5": 30.0,
+                }
+            ]
+        )
+        records = {
+            "lonely-a": AlphaRecord(
+                "lonely-a",
+                "repo/lonely-a",
+                "/tmp/lonely-a",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[1.0, 2.0], [2.0, 4.0]], dtype=float),
+            )
+        }
+
+        feature_frame = build_absolute_trend_frame(dataset, records)
+        delta_frame = build_family_relative_delta_frame(feature_frame)
+
+        self.assertEqual(len(delta_frame), 0)
+        self.assertIn("family_anchor", delta_frame.columns)
+        self.assertIn("Average ⬆️_delta", delta_frame.columns)

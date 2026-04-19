@@ -15,6 +15,51 @@ TREND_FEATURE_COLUMNS = (
 )
 
 
+def _clean_key(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    text = str(value).strip()
+    return text
+
+
+def _absolute_trend_columns(dataset: pd.DataFrame) -> list[str]:
+    columns = list(dataset.columns)
+    for column in TREND_FEATURE_COLUMNS:
+        if column not in columns:
+            columns.append(column)
+    return columns
+
+
+def _exact_parent_delta_columns(feature_frame: pd.DataFrame) -> list[str]:
+    columns = list(feature_frame.columns)
+    if "parent_model_id" not in columns:
+        columns.append("parent_model_id")
+    for column in TREND_FEATURE_COLUMNS:
+        delta_column = f"{column}_delta"
+        if delta_column not in columns:
+            columns.append(delta_column)
+    for target in PERFORMANCE_TARGETS:
+        delta_column = f"{target}_delta"
+        if delta_column not in columns:
+            columns.append(delta_column)
+    return columns
+
+
+def _family_relative_delta_columns(feature_frame: pd.DataFrame) -> list[str]:
+    columns = list(feature_frame.columns)
+    if "family_anchor" not in columns:
+        columns.append("family_anchor")
+    for column in TREND_FEATURE_COLUMNS:
+        delta_column = f"{column}_delta"
+        if delta_column not in columns:
+            columns.append(delta_column)
+    for target in PERFORMANCE_TARGETS:
+        delta_column = f"{target}_delta"
+        if delta_column not in columns:
+            columns.append(delta_column)
+    return columns
+
+
 def _safe_mean(values: np.ndarray) -> float:
     arr = np.asarray(values, dtype=float)
     finite = arr[np.isfinite(arr)]
@@ -51,14 +96,14 @@ def build_absolute_trend_frame(
         if record is None:
             continue
         rows.append({**row, **_record_trend_features(record)})
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows).reindex(columns=_absolute_trend_columns(dataset))
 
 
 def build_exact_parent_delta_frame(feature_frame: pd.DataFrame) -> pd.DataFrame:
     by_model_id = feature_frame.set_index("model_id", drop=False)
     rows: list[dict[str, object]] = []
     for row in feature_frame.to_dict(orient="records"):
-        source_model = str(row.get("source_model", "") or "").strip()
+        source_model = _clean_key(row.get("source_model", ""))
         if not source_model or source_model not in by_model_id.index:
             continue
         parent = by_model_id.loc[source_model]
@@ -68,23 +113,30 @@ def build_exact_parent_delta_frame(feature_frame: pd.DataFrame) -> pd.DataFrame:
         for target in PERFORMANCE_TARGETS:
             delta_row[f"{target}_delta"] = float(row[target]) - float(parent[target])
         rows.append(delta_row)
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows).reindex(columns=_exact_parent_delta_columns(feature_frame))
+
+
+def _family_anchor_key(row: pd.Series) -> str:
+    audited_family = _clean_key(row.get("audited_base_family", ""))
+    if audited_family:
+        return audited_family
+    return _clean_key(row.get("candidate_family", ""))
 
 
 def build_family_relative_delta_frame(feature_frame: pd.DataFrame) -> pd.DataFrame:
-    anchor_key = feature_frame["audited_base_family"].fillna("").replace("", pd.NA)
-    anchored = feature_frame.assign(_family_anchor=anchor_key.fillna(feature_frame["candidate_family"]))
+    family_keys = feature_frame.apply(_family_anchor_key, axis=1)
     rows: list[dict[str, object]] = []
-    for family, family_frame in anchored.groupby("_family_anchor", dropna=False):
-        if pd.isna(family) or len(family_frame) < 2:
+    for family, family_frame in feature_frame.groupby(family_keys, dropna=False):
+        family_key = _clean_key(family)
+        if not family_key or len(family_frame) < 2:
             continue
         trend_anchor = family_frame.loc[:, list(TREND_FEATURE_COLUMNS)].median(numeric_only=True)
         target_anchor = family_frame.loc[:, list(PERFORMANCE_TARGETS)].median(numeric_only=True)
         for row in family_frame.to_dict(orient="records"):
-            delta_row = {**row, "family_anchor": family}
+            delta_row = {**row, "family_anchor": family_key}
             for column in TREND_FEATURE_COLUMNS:
                 delta_row[f"{column}_delta"] = float(row[column]) - float(trend_anchor[column])
             for target in PERFORMANCE_TARGETS:
                 delta_row[f"{target}_delta"] = float(row[target]) - float(target_anchor[target])
             rows.append(delta_row)
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows).reindex(columns=_family_relative_delta_columns(feature_frame))
