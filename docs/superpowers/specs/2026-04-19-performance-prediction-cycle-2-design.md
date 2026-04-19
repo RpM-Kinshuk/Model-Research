@@ -48,6 +48,13 @@ Excluded:
 - deep supervised models
 - claim inflation around general benchmark completion
 
+Deferred but explicitly relevant to the broader prediction phase:
+
+- testing `absolute trend` style signals against performance
+- testing `lineage-relative trend` style signals against performance
+
+Those should be treated as separate correlation-style prediction diagnostics later unless they can be added with almost no extra complexity.
+
 ## Dataset
 
 Use the same joined scored dataset from Cycle 1.
@@ -210,6 +217,7 @@ If Cycle 2 works:
 
 - continue to one more small mixed-zoo prediction cycle
 - likely with one carefully chosen representation improvement
+- in the broader prediction phase, test whether `absolute trend` and `lineage-relative trend` style signals correlate with benchmark performance, if that has not already been checked cleanly
 
 If Cycle 2 does not work:
 
