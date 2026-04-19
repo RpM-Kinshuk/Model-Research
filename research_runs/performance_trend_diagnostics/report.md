@@ -1,6 +1,6 @@
 # Performance Trend Diagnostics
 
-## Best Absolute-Trend Rows
+## Top Absolute-Trend Rows By Target
 | bucket | target | feature | control_mode | n | spearman | r2 | mae |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | heterogeneous | Average ⬆️ | trend_global_mean | structural_adjusted | 21 | 0.149 | 0.324 | 2.500 |
@@ -13,7 +13,7 @@
 | all_scored | MMLU-PRO | trend_global_start | structural_adjusted | 374 | 0.058 | 0.282 | 6.523 |
 | all_scored | MMLU-PRO | trend_global_end | structural_adjusted | 374 | 0.025 | 0.279 | 6.505 |
 
-## Best Exact-Parent Rows
+## Top Exact-Parent Rows By Target
 | bucket | target | feature | control_mode | n | spearman | r2 | mae |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | heterogeneous | Average ⬆️_delta | trend_global_mean_delta | structural_adjusted | 12 | -0.748 | 0.870 | 1.367 |
@@ -26,7 +26,7 @@
 | heterogeneous | MMLU-PRO_delta | trend_global_end_minus_start_delta | structural_adjusted | 12 | -0.357 | 0.628 | 1.205 |
 | heterogeneous | MMLU-PRO_delta | trend_global_mean_delta | structural_adjusted | 12 | -0.091 | 0.282 | 1.730 |
 
-## Best Family-Relative Rows
+## Top Family-Relative Rows By Target
 | bucket | target | feature | control_mode | n | spearman | r2 | mae |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | all_scored | Average ⬆️_delta | trend_global_mean_delta | structural_adjusted | 155 | 0.070 | 0.217 | 2.593 |

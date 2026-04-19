@@ -400,6 +400,6 @@ class TrendDiagnosticsAnalysisTests(unittest.TestCase):
         report = render_trend_report(rows)
 
         self.assertIn("# Performance Trend Diagnostics", report)
-        self.assertIn("## Best Absolute-Trend Rows", report)
-        self.assertIn("## Best Exact-Parent Rows", report)
-        self.assertIn("## Best Family-Relative Rows", report)
+        self.assertIn("## Top Absolute-Trend Rows By Target", report)
+        self.assertIn("## Top Exact-Parent Rows By Target", report)
+        self.assertIn("## Top Family-Relative Rows By Target", report)
