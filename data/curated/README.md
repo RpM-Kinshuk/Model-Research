@@ -14,3 +14,9 @@ Main outputs:
 The canonical table is `model_zoo_phase2.csv`.
 
 Derived views should be regenerated from the canonical table rather than hand-edited.
+
+For larger experimental builds, keep outputs in a versioned subdirectory such as:
+
+- `data/curated/phase2_v3/`
+
+and treat that directory's `model_zoo_phase2.csv` as the canonical table for that specific build.

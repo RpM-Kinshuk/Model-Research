@@ -145,3 +145,44 @@ def test_build_phase2_outputs_records_probe_failures(tmp_path: Path):
     assert fake_probe.called
     assert (output_dir / "model_zoo_phase2_probe_failures.csv").exists()
     assert outputs["probe_failures"]["failure_class"].iloc[0] == "adapter_base_unresolved"
+
+
+def test_build_phase2_outputs_can_append_supplementary_candidates(tmp_path: Path):
+    metadata_path = tmp_path / "sampled_metadata.csv"
+    leaderboard_path = tmp_path / "sampled_leaderboard.csv"
+    atlas_path = tmp_path / "large_nlp_data.json"
+    svd_dir = tmp_path / "svd_results"
+    output_dir = tmp_path / "curated"
+    svd_dir.mkdir()
+
+    pd.DataFrame(
+        [{"model_id": "org/base", "source_model": "unknown", "base_model_relation": "source"}]
+    ).to_csv(metadata_path, index=False)
+    pd.DataFrame([], columns=["model_id", "Architecture", "#Params (B)", "Type", "Average ⬆️", "pipeline_tag"]).to_csv(leaderboard_path, index=False)
+    atlas_path.write_text(json.dumps({"nodes": [], "edges": []}))
+
+    supplementary = pd.DataFrame(
+        [
+            {
+                "model_id": "org/vision-model",
+                "source_model": "",
+                "base_model_relation": "unknown",
+                "pipeline_tag": "image-text-to-text",
+                "candidate_source": "hf_search",
+            }
+        ]
+    )
+
+    outputs = build_phase2_outputs(
+        metadata_path=metadata_path,
+        leaderboard_path=leaderboard_path,
+        atlas_json_path=atlas_path,
+        svd_dir=svd_dir,
+        output_dir=output_dir,
+        target_size=2,
+        skip_hub_probes=True,
+        supplementary_candidates=supplementary,
+    )
+    assert "org/vision-model" in set(outputs["canonical"]["model_id"])
+    vision_row = outputs["canonical"].loc[outputs["canonical"]["model_id"] == "org/vision-model"].iloc[0]
+    assert vision_row["primary_type_bucket"] == "multimodal"

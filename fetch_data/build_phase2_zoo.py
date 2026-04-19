@@ -39,6 +39,8 @@ def build_phase2_outputs(
     output_dir: Path,
     target_size: int,
     skip_hub_probes: bool,
+    supplementary_candidates: pd.DataFrame | None = None,
+    leaderboard_supplementary_candidates: pd.DataFrame | None = None,
     probe_fn=None,
 ) -> dict[str, pd.DataFrame]:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -54,8 +56,32 @@ def build_phase2_outputs(
         canonical_model_key(repo_id, revision)
         for repo_id, revision in zip(metadata["repo_id_norm"], metadata["revision_norm"], strict=False)
     ]
+    metadata["candidate_source"] = "seed_metadata"
+    atlas["candidate_source"] = "atlas"
 
-    combined = pd.concat([metadata, atlas], ignore_index=True, sort=False)
+    sources = [metadata, atlas]
+    if leaderboard_supplementary_candidates is not None and not leaderboard_supplementary_candidates.empty:
+        sources.append(leaderboard_supplementary_candidates.copy())
+    if supplementary_candidates is not None and not supplementary_candidates.empty:
+        supplementary = supplementary_candidates.copy()
+        if "repo_id_norm" not in supplementary.columns:
+            supplementary["repo_id_norm"] = supplementary["model_id"].map(normalize_repo_id)
+        if "revision_norm" not in supplementary.columns:
+            supplementary["revision_norm"] = supplementary["model_id"].map(lambda value: parse_repo_and_revision(value)[1])
+        if "canonical_model_key" not in supplementary.columns:
+            supplementary["canonical_model_key"] = [
+                canonical_model_key(repo_id, revision)
+                for repo_id, revision in zip(
+                    supplementary["repo_id_norm"],
+                    supplementary["revision_norm"],
+                    strict=False,
+                )
+            ]
+        if "candidate_source" not in supplementary.columns:
+            supplementary["candidate_source"] = "supplementary"
+        sources.append(supplementary)
+
+    combined = pd.concat(sources, ignore_index=True, sort=False)
     combined = combined.drop_duplicates(subset=["canonical_model_key"], keep="first")
     combined = combined.merge(
         leaderboard_canonical.drop(columns=["model_id"], errors="ignore"),
@@ -138,12 +164,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--svd-dir", type=Path, default=Path("svd_results"))
     parser.add_argument("--output-dir", type=Path, default=Path("data/curated"))
     parser.add_argument("--target-size", type=int, default=15000)
+    parser.add_argument("--supplement-leaderboard", action="store_true")
+    parser.add_argument("--supplement-hf", action="store_true")
+    parser.add_argument("--supplement-per-query-limit", type=int, default=250)
     parser.add_argument("--skip-hub-probes", action="store_true")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    leaderboard_supplementary_candidates = None
+    if args.supplement_leaderboard:
+        from fetch_data.leaderboard_supplement import load_leaderboard_supplementary_candidates
+
+        leaderboard_supplementary_candidates = load_leaderboard_supplementary_candidates()
+    supplementary_candidates = None
+    if args.supplement_hf:
+        from huggingface_hub import HfApi
+
+        from fetch_data.hf_supplement import collect_hf_supplementary_candidates
+
+        supplementary_candidates = collect_hf_supplementary_candidates(
+            api=HfApi(token=True),
+            per_query_limit=args.supplement_per_query_limit,
+        )
     build_phase2_outputs(
         metadata_path=args.metadata_path,
         leaderboard_path=args.leaderboard_path,
@@ -152,6 +196,8 @@ def main() -> None:
         output_dir=args.output_dir,
         target_size=args.target_size,
         skip_hub_probes=args.skip_hub_probes,
+        leaderboard_supplementary_candidates=leaderboard_supplementary_candidates,
+        supplementary_candidates=supplementary_candidates,
     )
 
 
