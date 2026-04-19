@@ -46,17 +46,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--common-matched-csv",
         type=Path,
-        default=REPO_ROOT / "correlation_runs" / "csv_common_schema_research" / "matched_common_schema_models.csv",
+        default=REPO_ROOT / "archive" / "correlation_runs" / "csv_common_schema_research" / "matched_common_schema_models.csv",
     )
     parser.add_argument(
         "--module-features-csv",
         type=Path,
-        default=REPO_ROOT / "correlation_runs" / "csv_common_schema_research" / "common_schema_module_features.csv",
+        default=REPO_ROOT / "archive" / "correlation_runs" / "csv_common_schema_research" / "common_schema_module_features.csv",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=REPO_ROOT / "correlation_runs" / "alpha_near_two_check",
+        default=REPO_ROOT / "archive" / "correlation_runs" / "alpha_near_two_check",
     )
     parser.add_argument(
         "--cv-splits",
