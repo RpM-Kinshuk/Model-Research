@@ -118,6 +118,72 @@ class TrendDiagnosticsTableTests(unittest.TestCase):
         self.assertAlmostEqual(float(row["trend_global_mean_delta"]), 1.5)
         self.assertAlmostEqual(float(row["MMLU-PRO_delta"]), 5.0)
 
+    def test_build_exact_parent_delta_frame_resolves_slash_form_source_model_with_normalized_ids(self) -> None:
+        dataset = pd.DataFrame(
+            [
+                {
+                    "model_id": "repo--parent-a",
+                    "display_name": "repo/parent-a",
+                    "source_model": "",
+                    "base_model_relation": "",
+                    "audited_base_family": "fam/a",
+                    "candidate_family": "fam/a",
+                    "query_bucket": "supported_candidate",
+                    "common_schema": True,
+                    "schema_name": "common_llm_7",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "Average ⬆️": 10.0,
+                    "MMLU-PRO": 11.0,
+                    "MATH Lvl 5": 12.0,
+                },
+                {
+                    "model_id": "repo--child-a",
+                    "display_name": "repo/child-a",
+                    "source_model": "repo/parent-a",
+                    "base_model_relation": "finetune",
+                    "audited_base_family": "fam/a",
+                    "candidate_family": "fam/a",
+                    "query_bucket": "supported_candidate",
+                    "common_schema": True,
+                    "schema_name": "common_llm_7",
+                    "num_layers": 2,
+                    "raw_module_count": 2,
+                    "Average ⬆️": 15.0,
+                    "MMLU-PRO": 16.0,
+                    "MATH Lvl 5": 20.0,
+                },
+            ]
+        )
+        records = {
+            "repo--parent-a": AlphaRecord(
+                "repo--parent-a",
+                "repo/parent-a",
+                "/tmp/repo--parent-a",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[1.0, 2.0], [2.0, 3.0]], dtype=float),
+            ),
+            "repo--child-a": AlphaRecord(
+                "repo--child-a",
+                "repo/child-a",
+                "/tmp/repo--child-a",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[2.0, 3.0], [4.0, 5.0]], dtype=float),
+            ),
+        }
+
+        feature_frame = build_absolute_trend_frame(dataset, records)
+        delta_frame = build_exact_parent_delta_frame(feature_frame)
+
+        self.assertEqual(len(delta_frame), 1)
+        row = delta_frame.iloc[0]
+        self.assertEqual(row["model_id"], "repo--child-a")
+        self.assertEqual(row["parent_model_id"], "repo/parent-a")
+        self.assertAlmostEqual(float(row["MMLU-PRO_delta"]), 5.0)
+        self.assertAlmostEqual(float(row["trend_global_mean_delta"]), 1.5)
+
     def test_build_family_relative_delta_frame_uses_family_median_anchor(self) -> None:
         feature_frame = build_absolute_trend_frame(self._dataset(), self._records())
         delta_frame = build_family_relative_delta_frame(feature_frame)

@@ -16,6 +16,7 @@ TREND_FEATURE_COLUMNS = (
     "trend_global_end",
     "trend_global_end_minus_start",
 )
+EXACT_PARENT_RELATIONS = {"finetune"}
 ANALYSIS_COLUMNS = (
     "analysis",
     "bucket",
@@ -72,6 +73,14 @@ def _family_relative_delta_columns(feature_frame: pd.DataFrame) -> list[str]:
         if delta_column not in columns:
             columns.append(delta_column)
     return columns
+
+
+def _model_identity_keys(value: object) -> tuple[str, ...]:
+    text = _clean_key(value)
+    if not text:
+        return ()
+    keys = [text, text.replace("/", "--"), text.replace("--", "/")]
+    return tuple(dict.fromkeys(key for key in keys if key))
 
 
 def _safe_mean(values: np.ndarray) -> float:
@@ -132,13 +141,33 @@ def build_absolute_trend_frame(
 
 def build_exact_parent_delta_frame(feature_frame: pd.DataFrame) -> pd.DataFrame:
     by_model_id = feature_frame.set_index("model_id", drop=False)
+    by_display_name = (
+        feature_frame.set_index("display_name", drop=False)
+        if "display_name" in feature_frame.columns
+        else pd.DataFrame()
+    )
     rows: list[dict[str, object]] = []
     for row in feature_frame.to_dict(orient="records"):
         source_model = _clean_key(row.get("source_model", ""))
-        if not source_model or source_model not in by_model_id.index:
+        relation = _clean_key(row.get("base_model_relation", "")).lower()
+        if relation not in EXACT_PARENT_RELATIONS:
             continue
-        parent = by_model_id.loc[source_model]
-        delta_row = {**row, "parent_model_id": source_model}
+        parent = None
+        parent_id = source_model
+        for key in _model_identity_keys(source_model):
+            if key in by_display_name.index:
+                parent = by_display_name.loc[key]
+                break
+            if key in by_model_id.index:
+                parent = by_model_id.loc[key]
+                break
+        if parent is None:
+            continue
+        if isinstance(parent, pd.DataFrame):
+            parent = parent.iloc[0]
+        if not parent_id:
+            parent_id = _clean_key(parent.get("display_name", "")) or _clean_key(parent.get("model_id", ""))
+        delta_row = {**row, "parent_model_id": parent_id}
         for column in TREND_FEATURE_COLUMNS:
             delta_row[f"{column}_delta"] = float(row[column]) - float(parent[column])
         for target in PERFORMANCE_TARGETS:

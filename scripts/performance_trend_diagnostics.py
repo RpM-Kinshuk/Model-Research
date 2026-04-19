@@ -108,7 +108,8 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 )
 
-    result_frame = pd.concat(results, ignore_index=True) if results else pd.DataFrame()
+    non_empty_results = [frame for frame in results if not frame.empty]
+    result_frame = pd.concat(non_empty_results, ignore_index=True) if non_empty_results else pd.DataFrame()
     if result_frame.empty:
         result_frame = pd.DataFrame(columns=["analysis", "bucket", "target", "feature", "control_mode", "n", "spearman", "r2", "mae"])
 
