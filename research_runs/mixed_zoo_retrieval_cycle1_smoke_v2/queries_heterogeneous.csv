@@ -1,0 +1,1 @@
+model_id,display_name,path,num_layers,raw_module_count,raw_modules,common_schema,schema_name,source_model,base_model_relation,Architecture,#Params (B),Generation,Type,audited_base_family,label_status,bucket_override,candidate_family,query_bucket,size_bucket

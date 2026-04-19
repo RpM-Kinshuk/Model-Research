@@ -603,3 +603,63 @@ So the next move should be:
 - keep the center on model-zoo retrieval and organization
 - use the strict benchmark as the control and the lean benchmark as the broader probe
 - avoid expanding into too many new side experiments before the writing is stable
+
+## Paper-Facing Narrative
+
+Main claim:
+
+`Model-intrinsic spectral structure is useful for organizing a mixed zoo of models, and module-aware traces provide the strongest current signal for family-level retrieval.`
+
+Supporting claim:
+
+`A heterogeneity-aware role-aggregated comparison helps when exact schemas differ, and simple trend-style spectral summaries are useful only as secondary descriptive features.`
+
+Non-claims:
+
+- we do **not** solve open-world model identification
+- we do **not** solve robust rejection
+- we do **not** solve general performance prediction
+- we do **not** show that one scalar spectral metric explains the zoo
+
+## Remaining Preliminary Work
+
+The preliminary study is close to wrap-up, but a few focused items still matter before scale-up.
+
+1. `Write the preliminary study cleanly`
+- turn this note into a short paper-outline structure:
+  - problem
+  - benchmark
+  - methods
+  - retrieval results
+  - mixed-zoo/heterogeneous results
+  - secondary prediction/trend results
+  - limitations
+
+2. `Stabilize the reproducible artifact set`
+- keep the strict benchmark, lean mixed-zoo benchmark, prediction cycles, and trend diagnostics as the canonical preliminary artifacts
+- avoid adding more side experiments unless they directly affect the final preliminary narrative
+
+3. `Decide the scale-up experiment set`
+- preserve the same core experiment family for a larger model pool:
+  - strict homogeneous control
+  - lean mixed-zoo retrieval
+  - heterogeneity-aware retrieval comparison
+  - neighborhood-based performance prediction
+  - descriptive trend diagnostics as secondary features
+
+4. `Keep the method hierarchy disciplined`
+- primary methods:
+  - `full_module_trace`
+  - `role_aggregated_trace`
+- secondary methods:
+  - `attention_trace`
+  - `pl_alpha_scalar`
+  - trend-style descriptive features
+- side results only:
+  - rejection
+  - metadata-heavy controls
+
+5. `State the current limits clearly before scale-up`
+- prediction is promising but uneven
+- exact-parent and family-relative trend evidence remain secondary
+- heterogeneous support is real but still smaller than the main common-schema regime
