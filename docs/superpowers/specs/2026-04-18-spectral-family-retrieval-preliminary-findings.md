@@ -463,6 +463,15 @@ Overall pattern:
 - structurally controlled spectral prediction produced the best row in only `2 / 12` slices
 - `pl_alpha_scalar` never produced the best row
 
+### Prediction Run Optimization Note
+
+This pilot was then rerun once as a pure run-cost optimization, not as a new experiment.
+
+- tested `repeated_cpu` (`7:33.59`), `cpu_cache_only` (`0:45.37`), and `cache_plus_gpu0` on GPU 0 (`0:36.39`) on the single-target `Average ⬆️` bakeoff
+- kept `cpu_cache_only` because it was already materially faster than `repeated_cpu` and the extra GPU gain was modest relative to the added complexity
+- `cpu_cache_only` matched the earlier pilot exactly on summary metrics and OOF predictions; `cache_plus_gpu0` also matched up to tiny floating-point noise
+- optimized bakeoff/final-run artifacts: [repeated bakeoff](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_prediction_bakeoff_repeated/report.md), [cpu-cache bakeoff](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_prediction_bakeoff_cpu_cache/report.md), [gpu0 bakeoff](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_prediction_bakeoff_gpu0/report.md), [optimized final run](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-retrieval-prelim-v2/research_runs/performance_prediction_cycle1_optimized/report.md)
+
 Interpretation:
 
 - the current representation does carry real predictive signal
