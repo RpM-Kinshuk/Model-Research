@@ -10,6 +10,8 @@ from spectral_research.trend_diagnostics import (
     build_absolute_trend_frame,
     build_exact_parent_delta_frame,
     build_family_relative_delta_frame,
+    analyze_trend_rows,
+    render_trend_report,
 )
 
 
@@ -251,3 +253,87 @@ class TrendDiagnosticsTableTests(unittest.TestCase):
         self.assertEqual(len(delta_frame), 0)
         self.assertIn("family_anchor", delta_frame.columns)
         self.assertIn("Average ⬆️_delta", delta_frame.columns)
+
+
+class TrendDiagnosticsAnalysisTests(unittest.TestCase):
+    def test_analyze_trend_rows_returns_spearman_and_r2(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "model_id": ["a", "b", "c", "d"],
+                "query_bucket": [
+                    "supported_candidate",
+                    "supported_candidate",
+                    "heterogeneous",
+                    "heterogeneous",
+                ],
+                "trend_global_end_minus_start": [0.0, 1.0, 2.0, 3.0],
+                "MMLU-PRO": [10.0, 20.0, 30.0, 40.0],
+                "num_layers": [2, 2, 2, 2],
+                "raw_module_count": [2, 2, 2, 2],
+                "common_schema": [True, True, False, False],
+                "schema_name": ["common", "common", "bert_like", "bert_like"],
+            }
+        )
+
+        results = analyze_trend_rows(
+            frame,
+            feature_columns=["trend_global_end_minus_start"],
+            target_columns=["MMLU-PRO"],
+            analysis_name="absolute",
+            bucket_name="all_scored",
+            use_structural_controls=False,
+        )
+
+        self.assertEqual(len(results), 1)
+        row = results.iloc[0]
+        self.assertEqual(row["analysis"], "absolute")
+        self.assertEqual(row["bucket"], "all_scored")
+        self.assertEqual(row["feature"], "trend_global_end_minus_start")
+        self.assertAlmostEqual(float(row["spearman"]), 1.0)
+        self.assertGreater(float(row["r2"]), 0.90)
+
+    def test_render_trend_report_includes_three_sections(self) -> None:
+        rows = pd.DataFrame(
+            [
+                {
+                    "analysis": "absolute",
+                    "bucket": "all_scored",
+                    "target": "MMLU-PRO",
+                    "feature": "trend_global_end_minus_start",
+                    "control_mode": "raw",
+                    "n": 12,
+                    "spearman": 0.5,
+                    "r2": 0.2,
+                    "mae": 1.1,
+                },
+                {
+                    "analysis": "exact_parent",
+                    "bucket": "all_scored",
+                    "target": "MMLU-PRO",
+                    "feature": "trend_global_end_minus_start_delta",
+                    "control_mode": "raw",
+                    "n": 7,
+                    "spearman": 0.4,
+                    "r2": 0.1,
+                    "mae": 1.2,
+                },
+                {
+                    "analysis": "family_relative",
+                    "bucket": "heterogeneous",
+                    "target": "MATH Lvl 5",
+                    "feature": "trend_global_end_minus_start_delta",
+                    "control_mode": "raw",
+                    "n": 9,
+                    "spearman": 0.3,
+                    "r2": 0.05,
+                    "mae": 1.3,
+                },
+            ]
+        )
+
+        report = render_trend_report(rows)
+
+        self.assertIn("# Performance Trend Diagnostics", report)
+        self.assertIn("## Best Absolute-Trend Rows", report)
+        self.assertIn("## Best Exact-Parent Rows", report)
+        self.assertIn("## Best Family-Relative Rows", report)
