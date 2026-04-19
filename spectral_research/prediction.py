@@ -310,15 +310,23 @@ def summarize_predictions(
     )
 
     for bucket, bucket_frame in predictions.groupby("query_bucket", dropna=False):
-        valid = bucket_frame[prediction_column].notna()
-        if not valid.any():
+        target_values = pd.to_numeric(bucket_frame[target], errors="coerce").to_numpy(dtype=float)
+        prediction_values = pd.to_numeric(bucket_frame[prediction_column], errors="coerce").to_numpy(
+            dtype=float
+        )
+        valid_mask = np.isfinite(target_values) & np.isfinite(prediction_values)
+        if not valid_mask.any():
             continue
 
-        y_true = bucket_frame.loc[valid, target].to_numpy(dtype=float)
-        y_pred = bucket_frame.loc[valid, prediction_column].to_numpy(dtype=float)
+        y_true = target_values[valid_mask]
+        y_pred = prediction_values[valid_mask]
         mae = float(mean_absolute_error(y_true, y_pred))
         r2 = float(r2_score(y_true, y_pred)) if len(y_true) >= 2 else float("nan")
-        rho = float(spearmanr(y_true, y_pred).statistic) if len(y_true) >= 2 else float("nan")
+        rho = (
+            float("nan")
+            if len(y_true) < 2 or np.all(y_true == y_true[0]) or np.all(y_pred == y_pred[0])
+            else float(spearmanr(y_true, y_pred).statistic)
+        )
         rows.append(
             {
                 "target": target,
@@ -327,7 +335,7 @@ def summarize_predictions(
                 "bucket": bucket,
                 "k": int(k),
                 "weighted": bool(weighted),
-                "n": int(valid.sum()),
+                "n": int(valid_mask.sum()),
                 "r2": r2,
                 "mae": mae,
                 "spearman": rho,

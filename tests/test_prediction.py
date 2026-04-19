@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import warnings
 from unittest.mock import patch
 
 import numpy as np
@@ -336,3 +337,44 @@ class PredictionModelTests(unittest.TestCase):
 
         self.assertEqual(set(summary["bucket"]), {"supported_candidate", "heterogeneous"})
         self.assertTrue(summary["mae"].notna().all())
+
+    def test_summarize_predictions_skips_missing_targets(self) -> None:
+        predictions = pd.DataFrame(
+            [
+                {"query_bucket": "supported_candidate", "Average ⬆️": 10.0, "prediction": 11.0, "mode": "raw_spectral"},
+                {"query_bucket": "supported_candidate", "Average ⬆️": np.nan, "prediction": 13.0, "mode": "raw_spectral"},
+                {"query_bucket": "supported_candidate", "Average ⬆️": 14.0, "prediction": 15.0, "mode": "raw_spectral"},
+            ]
+        )
+
+        summary = summarize_predictions(
+            predictions,
+            target="Average ⬆️",
+            method="pl_alpha_scalar",
+            k=1,
+            weighted=False,
+        )
+
+        self.assertEqual(int(summary.iloc[0]["n"]), 2)
+        self.assertTrue(np.isfinite(float(summary.iloc[0]["mae"])))
+
+    def test_summarize_predictions_handles_constant_inputs_without_warning(self) -> None:
+        predictions = pd.DataFrame(
+            [
+                {"query_bucket": "supported_candidate", "Average ⬆️": 10.0, "prediction": 5.0, "mode": "raw_spectral"},
+                {"query_bucket": "supported_candidate", "Average ⬆️": 10.0, "prediction": 5.0, "mode": "raw_spectral"},
+            ]
+        )
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("error")
+            summary = summarize_predictions(
+                predictions,
+                target="Average ⬆️",
+                method="pl_alpha_scalar",
+                k=1,
+                weighted=False,
+            )
+
+        self.assertEqual(caught, [])
+        self.assertTrue(np.isnan(float(summary.iloc[0]["spearman"])))
