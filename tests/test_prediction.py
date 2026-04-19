@@ -918,9 +918,14 @@ class PredictionCliTests(unittest.TestCase):
 
         args = module.parse_args([])
 
+        self.assertEqual(type(args.output_dir), type(Path()))
         self.assertEqual(
             args.output_dir,
-            module.REPO_ROOT / "research_runs" / "performance_prediction_cycle2",
+            module.REPO_ROOT
+            / "research_runs"
+            / "preliminary"
+            / "prediction"
+            / "performance_prediction_cycle2",
         )
 
     def test_prediction_cli_accepts_optimization_mode_and_device(self) -> None:
