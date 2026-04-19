@@ -296,6 +296,13 @@ def summarize_predictions(
     predictions: pd.DataFrame, *, target: str, method: str, k: int, weighted: bool
 ) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
+    if "prediction" in predictions.columns:
+        prediction_column = "prediction"
+    elif "baseline_prediction" in predictions.columns:
+        prediction_column = "baseline_prediction"
+    else:
+        raise KeyError("predictions must include `prediction` or `baseline_prediction`")
+
     mode = (
         str(predictions["mode"].iloc[0])
         if "mode" in predictions.columns and not predictions.empty
@@ -303,12 +310,12 @@ def summarize_predictions(
     )
 
     for bucket, bucket_frame in predictions.groupby("query_bucket", dropna=False):
-        valid = bucket_frame["prediction"].notna()
+        valid = bucket_frame[prediction_column].notna()
         if not valid.any():
             continue
 
         y_true = bucket_frame.loc[valid, target].to_numpy(dtype=float)
-        y_pred = bucket_frame.loc[valid, "prediction"].to_numpy(dtype=float)
+        y_pred = bucket_frame.loc[valid, prediction_column].to_numpy(dtype=float)
         mae = float(mean_absolute_error(y_true, y_pred))
         r2 = float(r2_score(y_true, y_pred)) if len(y_true) >= 2 else float("nan")
         rho = float(spearmanr(y_true, y_pred).statistic) if len(y_true) >= 2 else float("nan")

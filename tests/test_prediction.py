@@ -11,6 +11,7 @@ from spectral_research.prediction import (
     _group_key,
     join_prediction_targets,
     neighborhood_predict_oof,
+    summarize_predictions,
     structural_baseline_oof,
 )
 
@@ -321,3 +322,17 @@ class PredictionModelTests(unittest.TestCase):
 
         self.assertEqual(len(baseline), 4)
         self.assertIn("baseline_prediction", baseline.columns)
+
+    def test_summarize_predictions_accepts_structural_baseline_output(self) -> None:
+        baseline = structural_baseline_oof(self._frame(), target="Average ⬆️")
+
+        summary = summarize_predictions(
+            baseline,
+            target="Average ⬆️",
+            method="structural_basics_only",
+            k=0,
+            weighted=False,
+        )
+
+        self.assertEqual(set(summary["bucket"]), {"supported_candidate", "heterogeneous"})
+        self.assertTrue(summary["mae"].notna().all())
