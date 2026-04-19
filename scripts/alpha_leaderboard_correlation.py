@@ -49,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--leaderboard-csv",
         type=Path,
-        default=REPO_ROOT / "sampled_leaderboard.csv",
+        default=REPO_ROOT / "data" / "sampled_leaderboard.csv",
         help="Path to sampled_leaderboard.csv",
     )
     parser.add_argument(

@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--metadata-csv",
         type=Path,
-        default=REPO_ROOT / "sampled_metadata.csv",
+        default=REPO_ROOT / "data" / "sampled_metadata.csv",
         help="Path to sampled_metadata.csv",
     )
     parser.add_argument(
