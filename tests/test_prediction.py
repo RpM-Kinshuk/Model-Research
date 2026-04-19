@@ -1041,3 +1041,10 @@ class PredictionCliTests(unittest.TestCase):
             report = (output_dir / "report.md").read_text(encoding="utf-8")
             self.assertIn("# Performance Prediction Cycle 1", report)
             self.assertIn("_No rows._", report)
+
+
+class PredictionCliCycle2Tests(PredictionCliTests):
+    def test_supported_methods_include_schema_routed_trace(self) -> None:
+        module = self._load_module()
+
+        self.assertIn("schema_routed_trace", module.SUPPORTED_METHODS)

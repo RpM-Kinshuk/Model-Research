@@ -25,6 +25,7 @@ SUPPORTED_METHODS = (
     "pl_alpha_scalar",
     "full_module_trace",
     "role_aggregated_trace",
+    "schema_routed_trace",
 )
 RESULT_COLUMNS = ["target", "method", "mode", "bucket", "k", "weighted", "n", "r2", "mae", "spearman"]
 
