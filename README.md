@@ -8,7 +8,7 @@ This repository contains the active preliminary research pipeline for organizing
 - Active package: `spectral_research/`
 - Active scripts: `scripts/`
 - Active artifacts: `research_runs/`
-- Legacy preserved material: `archive/`
+- Legacy material is still in the current root-level directories for now and will be moved under `archive/` during this cleanup.
 
 ## Active areas
 
@@ -24,4 +24,4 @@ This repository contains the active preliminary research pipeline for organizing
 
 - `docs/superpowers/` contains design and planning history.
 - `docs/research/preliminary/` is the reader-facing summary of the current preliminary phase.
-- `archive/` preserves older materials that are no longer part of the active prelim workflow.
+- Old materials are being consolidated out of the root as part of this cleanup.
