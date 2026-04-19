@@ -30,5 +30,6 @@ This directory keeps both the current canonical experiment CLIs and a small set 
 - `alpha_near_two_hypothesis_check.py`
 - `common_schema_performance_research.py`
 - `find_merge_models_with_valid_analysis.py`
+  - Preserved helper defaults to `research_runs/legacy/merge_models_with_valid_analysis.csv`
 - `spectral_similarity_research.py`
   - Preserved helper defaults to `research_runs/legacy/spectral_similarity_research`

@@ -4,7 +4,7 @@ This directory stores experiment artifacts.
 
 ## Canonical layout
 
-Current preliminary work uses grouped canonical paths under `research_runs/preliminary/`:
+Current preliminary work uses grouped paths under `research_runs/preliminary/`. Some groups contain both canonical artifacts and clearly marked support or intermediate runs; see the per-group README where one exists for the exact split.
 
 - `research_runs/preliminary/retrieval/`
 - `research_runs/preliminary/rejection/`
@@ -20,5 +20,6 @@ Preserved helper chains that still write historical-style outputs should use `re
 - `research_runs/legacy/common_schema_performance_research/`
 - `research_runs/legacy/alpha_near_two_check/`
 - `research_runs/legacy/spectral_similarity_research/`
+- `research_runs/legacy/merge_models_with_valid_analysis.csv`
 
 The old flat layout has been retired for current preliminary work, but these legacy compatibility paths remain available for preserved helper workflows.
