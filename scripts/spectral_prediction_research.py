@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import spectral_research.prediction as prediction_module
 from spectral_research.prediction import (
     PERFORMANCE_TARGETS,
     build_prediction_dataset,
@@ -188,7 +189,11 @@ def _baseline_rows(dataset: pd.DataFrame, *, target: str, cv_splits: int) -> tup
 
 
 def _pairwise_cache_backend(method: str, *, optimization_mode: str, device: str) -> tuple[str, str]:
-    if optimization_mode == "cache_plus_gpu0" and method == "pl_alpha_scalar":
+    if (
+        optimization_mode == "cache_plus_gpu0"
+        and method == "pl_alpha_scalar"
+        and prediction_module.torch is not None
+    ):
         return "torch", device
     return "cpu", "cpu"
 

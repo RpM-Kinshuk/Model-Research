@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from alpha_cluster_dashboard.data import AlphaRecord, COMMON_ALPHA_MODULES, schema_name
+import spectral_research.prediction as prediction_module
 from spectral_research.prediction import (
     _group_key,
     build_pairwise_score_matrix,
@@ -386,6 +387,19 @@ class PredictionModelTests(unittest.TestCase):
 
 
 class PredictionOptimizationModeTests(unittest.TestCase):
+    def _load_module(self):
+        script_path = (
+            Path(__file__).resolve().parents[1] / "scripts" / "spectral_prediction_research.py"
+        )
+        spec = importlib.util.spec_from_file_location("spectral_prediction_research_cli", script_path)
+
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+
     def _records(self) -> dict[str, AlphaRecord]:
         return {
             "m1": AlphaRecord(
@@ -499,6 +513,9 @@ class PredictionOptimizationModeTests(unittest.TestCase):
         self.assertEqual(model_index["m4"], 3)
 
     def test_build_pairwise_score_matrix_torch_backend_matches_cpu_backend(self) -> None:
+        if prediction_module.torch is None:
+            self.skipTest("torch is not installed")
+
         cpu_matrix, cpu_index = build_pairwise_score_matrix(
             self._frame(),
             self._records(),
@@ -515,6 +532,19 @@ class PredictionOptimizationModeTests(unittest.TestCase):
 
         self.assertEqual(cpu_index, torch_index)
         np.testing.assert_allclose(torch_matrix, cpu_matrix, rtol=0.0, atol=0.0, equal_nan=True)
+
+    def test_cache_plus_gpu0_falls_back_to_cpu_when_torch_is_missing(self) -> None:
+        module = self._load_module()
+
+        with patch.object(module.prediction_module, "torch", None):
+            backend, device = module._pairwise_cache_backend(
+                "pl_alpha_scalar",
+                optimization_mode="cache_plus_gpu0",
+                device="cuda:0",
+            )
+
+        self.assertEqual(backend, "cpu")
+        self.assertEqual(device, "cpu")
 
     def test_cached_neighborhood_predict_oof_matches_uncached_path(self) -> None:
         frame = self._frame()
