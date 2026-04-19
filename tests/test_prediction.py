@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import importlib.util
 import unittest
 import warnings
 from unittest.mock import patch
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -378,3 +380,92 @@ class PredictionModelTests(unittest.TestCase):
 
         self.assertEqual(caught, [])
         self.assertTrue(np.isnan(float(summary.iloc[0]["spearman"])))
+
+
+class PredictionCliTests(unittest.TestCase):
+    def test_prediction_cli_accepts_freeze_csv_targets_and_output_dir(self) -> None:
+        script_path = (
+            Path(__file__).resolve().parents[1] / "scripts" / "spectral_prediction_research.py"
+        )
+        spec = importlib.util.spec_from_file_location("spectral_prediction_research_cli", script_path)
+
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        args = module.parse_args(
+            [
+                "--freeze-csv",
+                "freeze.csv",
+                "--targets",
+                "Average ⬆️,MMLU-PRO,MATH Lvl 5",
+                "--output-dir",
+                "out",
+            ]
+        )
+
+        self.assertEqual(args.freeze_csv, Path("freeze.csv"))
+        self.assertEqual(args.targets, "Average ⬆️,MMLU-PRO,MATH Lvl 5")
+        self.assertEqual(args.output_dir, Path("out"))
+
+    def test_render_report_includes_best_rows_table_and_notes(self) -> None:
+        script_path = (
+            Path(__file__).resolve().parents[1] / "scripts" / "spectral_prediction_research.py"
+        )
+        spec = importlib.util.spec_from_file_location("spectral_prediction_research_cli", script_path)
+
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        results = pd.DataFrame(
+            [
+                {
+                    "target": "Average ⬆️",
+                    "method": "structural_basics_only",
+                    "mode": "baseline",
+                    "bucket": "supported_candidate",
+                    "k": 0,
+                    "weighted": False,
+                    "n": 10,
+                    "r2": 0.1,
+                    "mae": 1.0,
+                    "spearman": 0.2,
+                },
+                {
+                    "target": "Average ⬆️",
+                    "method": "role_aggregated_trace",
+                    "mode": "spectral_plus_structural",
+                    "bucket": "supported_candidate",
+                    "k": 5,
+                    "weighted": True,
+                    "n": 10,
+                    "r2": 0.3,
+                    "mae": 0.8,
+                    "spearman": 0.4,
+                },
+                {
+                    "target": "MMLU-PRO",
+                    "method": "pl_alpha_scalar",
+                    "mode": "raw_spectral",
+                    "bucket": "heterogeneous",
+                    "k": 3,
+                    "weighted": False,
+                    "n": 8,
+                    "r2": 0.2,
+                    "mae": 1.2,
+                    "spearman": 0.5,
+                },
+            ]
+        )
+
+        report = module.render_report(results)
+
+        self.assertIn("# Performance Prediction Cycle 1", report)
+        self.assertIn("## Best rows by target", report)
+        self.assertIn("role_aggregated_trace", report)
+        self.assertIn("- Raw spectral rows measure direct neighborhood signal.", report)
