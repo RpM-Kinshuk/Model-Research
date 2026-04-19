@@ -104,13 +104,13 @@ The branch now has many artifacts, but the preliminary story should keep referri
 - consolidated findings note:
   [preliminary-findings.md](./preliminary-findings.md)
 - strict control benchmark:
-  [report.md](../../../research_runs/spectral_family_retrieval_strict_headline_v2/report.md)
+  [report.md](../../../research_runs/preliminary/retrieval/spectral_family_retrieval_strict_headline_v2/report.md)
 - lean mixed-zoo benchmark:
-  [report.md](../../../research_runs/lean_mixed_zoo_benchmark/report.md)
+  [report.md](../../../research_runs/preliminary/retrieval/lean_mixed_zoo_benchmark/report.md)
 - performance prediction follow-up:
-  [report.md](../../../research_runs/performance_prediction_cycle2/report.md)
+  [report.md](../../../research_runs/preliminary/prediction/performance_prediction_cycle2/report.md)
 - trend diagnostics:
-  [report.md](../../../research_runs/performance_trend_diagnostics/report.md)
+  [report.md](../../../research_runs/preliminary/prediction/performance_trend_diagnostics/report.md)
 
 These are the documents and runs that should anchor the preliminary phase.
 

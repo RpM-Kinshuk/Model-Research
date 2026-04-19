@@ -103,7 +103,7 @@ That preserves the main research direction: zoo management first, heterogeneous 
 ## Canonical Supporting Artifacts
 
 - Consolidated findings: [preliminary-findings.md](./preliminary-findings.md)
-- Strict control benchmark: [report.md](../../../research_runs/spectral_family_retrieval_strict_headline_v2/report.md)
-- Lean mixed-zoo benchmark: [report.md](../../../research_runs/lean_mixed_zoo_benchmark/report.md)
-- Prediction Cycle 2: [report.md](../../../research_runs/performance_prediction_cycle2/report.md)
-- Trend diagnostics: [report.md](../../../research_runs/performance_trend_diagnostics/report.md)
+- Strict control benchmark: [report.md](../../../research_runs/preliminary/retrieval/spectral_family_retrieval_strict_headline_v2/report.md)
+- Lean mixed-zoo benchmark: [report.md](../../../research_runs/preliminary/retrieval/lean_mixed_zoo_benchmark/report.md)
+- Prediction Cycle 2: [report.md](../../../research_runs/preliminary/prediction/performance_prediction_cycle2/report.md)
+- Trend diagnostics: [report.md](../../../research_runs/preliminary/prediction/performance_trend_diagnostics/report.md)

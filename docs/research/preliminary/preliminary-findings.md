@@ -116,7 +116,7 @@ This is the cleanest current version of Tier A.
 
 The clearest results come from the strict headline slice.
 
-From [retrieval_metrics.csv](../../../research_runs/spectral_family_retrieval_strict_headline_v2/retrieval_metrics.csv):
+From [retrieval_metrics.csv](../../../research_runs/preliminary/retrieval/spectral_family_retrieval_strict_headline_v2/retrieval_metrics.csv):
 
 - `full_module_trace`
   - top-1: `0.918`
@@ -213,7 +213,7 @@ Rejection means:
 
 Before the mini-study, rejection was the weak part.
 
-On the strict headline slice, from [rejection_metrics.csv](../../../research_runs/spectral_family_retrieval_strict_headline_v2/rejection_metrics.csv):
+On the strict headline slice, from [rejection_metrics.csv](../../../research_runs/preliminary/retrieval/spectral_family_retrieval_strict_headline_v2/rejection_metrics.csv):
 
 - `pl_alpha_scalar` AUROC: `0.549`
 - `attention_trace` AUROC: `0.538`
@@ -240,9 +240,9 @@ We compared:
 
 Study outputs:
 
-- [confidence_rule_metrics.csv](../../../research_runs/rejection_confidence_study_strict_v1/confidence_rule_metrics.csv)
-- [best_rule_bucket_breakdown.csv](../../../research_runs/rejection_confidence_study_strict_v1/best_rule_bucket_breakdown.csv)
-- [report.md](../../../research_runs/rejection_confidence_study_strict_v1/report.md)
+- [confidence_rule_metrics.csv](../../../research_runs/preliminary/rejection/rejection_confidence_study_strict_v1/confidence_rule_metrics.csv)
+- [best_rule_bucket_breakdown.csv](../../../research_runs/preliminary/rejection/rejection_confidence_study_strict_v1/best_rule_bucket_breakdown.csv)
+- [report.md](../../../research_runs/preliminary/rejection/rejection_confidence_study_strict_v1/report.md)
 
 ### Main Mini-Study Result
 
@@ -418,10 +418,10 @@ We then ran one small performance-prediction pilot on the current joined scored 
 
 Pilot outputs:
 
-- [prediction_dataset.csv](../../../research_runs/performance_prediction_cycle1/prediction_dataset.csv)
-- [prediction_results.csv](../../../research_runs/performance_prediction_cycle1/prediction_results.csv)
-- [oof_predictions.csv](../../../research_runs/performance_prediction_cycle1/oof_predictions.csv)
-- [report.md](../../../research_runs/performance_prediction_cycle1/report.md)
+- [prediction_dataset.csv](../../../research_runs/preliminary/prediction/performance_prediction_cycle1/prediction_dataset.csv)
+- [prediction_results.csv](../../../research_runs/preliminary/prediction/performance_prediction_cycle1/prediction_results.csv)
+- [oof_predictions.csv](../../../research_runs/preliminary/prediction/performance_prediction_cycle1/oof_predictions.csv)
+- [report.md](../../../research_runs/preliminary/prediction/performance_prediction_cycle1/report.md)
 
 The prediction dataset had:
 
@@ -470,7 +470,7 @@ This pilot was then rerun once as a pure run-cost optimization, not as a new exp
 - tested `repeated_cpu` (`7:33.59`), `cpu_cache_only` (`0:45.37`), and `cache_plus_gpu0` on GPU 0 (`0:36.39`) on the single-target `Average ⬆️` bakeoff
 - kept `cpu_cache_only` because it was already materially faster than `repeated_cpu` and the extra GPU gain was modest relative to the added complexity
 - `cpu_cache_only` matched the earlier pilot exactly on summary metrics and OOF predictions; `cache_plus_gpu0` also matched up to tiny floating-point noise
-- audit trail for the timing decision: [repeated bakeoff provenance](../../../research_runs/performance_prediction_bakeoff_repeated/provenance.md), [cpu-cache bakeoff provenance](../../../research_runs/performance_prediction_bakeoff_cpu_cache/provenance.md), [gpu0 bakeoff provenance](../../../research_runs/performance_prediction_bakeoff_gpu0/provenance.md), [optimized final-run provenance](../../../research_runs/performance_prediction_cycle1_optimized/provenance.md)
+- audit trail for the timing decision: [repeated bakeoff provenance](../../../research_runs/preliminary/optimization/performance_prediction_bakeoff_repeated/provenance.md), [cpu-cache bakeoff provenance](../../../research_runs/preliminary/optimization/performance_prediction_bakeoff_cpu_cache/provenance.md), [gpu0 bakeoff provenance](../../../research_runs/preliminary/optimization/performance_prediction_bakeoff_gpu0/provenance.md), [optimized final-run provenance](../../../research_runs/preliminary/prediction/performance_prediction_cycle1_optimized/provenance.md)
 
 Interpretation:
 
@@ -488,10 +488,10 @@ We then ran one Cycle 2 follow-up with the kept optimized mode `cpu_cache_only` 
 
 Cycle 2 outputs:
 
-- [prediction_dataset.csv](../../../research_runs/performance_prediction_cycle2/prediction_dataset.csv)
-- [prediction_results.csv](../../../research_runs/performance_prediction_cycle2/prediction_results.csv)
-- [oof_predictions.csv](../../../research_runs/performance_prediction_cycle2/oof_predictions.csv)
-- [report.md](../../../research_runs/performance_prediction_cycle2/report.md)
+- [prediction_dataset.csv](../../../research_runs/preliminary/prediction/performance_prediction_cycle2/prediction_dataset.csv)
+- [prediction_results.csv](../../../research_runs/preliminary/prediction/performance_prediction_cycle2/prediction_results.csv)
+- [oof_predictions.csv](../../../research_runs/preliminary/prediction/performance_prediction_cycle2/oof_predictions.csv)
+- [report.md](../../../research_runs/preliminary/prediction/performance_prediction_cycle2/report.md)
 
 Interpretation stayed centered on `MMLU-PRO` and `MATH Lvl 5`.
 `Average ⬆️` stayed only a sanity target.
@@ -505,7 +505,7 @@ Compared with Cycle 1, the heterogeneous slice changed only partially:
 
 ## Performance Trend Diagnostics
 
-Outputs: [report.md](../../../research_runs/performance_trend_diagnostics/report.md), [trend_results.csv](../../../research_runs/performance_trend_diagnostics/trend_results.csv), [absolute_trend_dataset.csv](../../../research_runs/performance_trend_diagnostics/absolute_trend_dataset.csv), [exact_parent_delta_dataset.csv](../../../research_runs/performance_trend_diagnostics/exact_parent_delta_dataset.csv), [family_relative_delta_dataset.csv](../../../research_runs/performance_trend_diagnostics/family_relative_delta_dataset.csv).
+Outputs: [report.md](../../../research_runs/preliminary/prediction/performance_trend_diagnostics/report.md), [trend_results.csv](../../../research_runs/preliminary/prediction/performance_trend_diagnostics/trend_results.csv), [absolute_trend_dataset.csv](../../../research_runs/preliminary/prediction/performance_trend_diagnostics/absolute_trend_dataset.csv), [exact_parent_delta_dataset.csv](../../../research_runs/preliminary/prediction/performance_trend_diagnostics/exact_parent_delta_dataset.csv), [family_relative_delta_dataset.csv](../../../research_runs/preliminary/prediction/performance_trend_diagnostics/family_relative_delta_dataset.csv).
 
 `structural_adjusted` means adjusted/partial Spearman against the structural controls.
 Family-relative anchors are computed over all scored family members, so managed-slice family-relative rows are not fully bucket-local. This branch is descriptive-only.
@@ -570,16 +570,16 @@ The rejection result should be treated as:
 Strict benchmark:
 
 - [spectral_family_retrieval_label_freeze.csv](../../../data/manual_audits/spectral_family_retrieval_label_freeze.csv)
-- [report.md](../../../research_runs/spectral_family_retrieval_strict_headline_v2/report.md)
+- [report.md](../../../research_runs/preliminary/retrieval/spectral_family_retrieval_strict_headline_v2/report.md)
 
 Rejection mini-study:
 
-- [report.md](../../../research_runs/rejection_confidence_study_strict_v1/report.md)
+- [report.md](../../../research_runs/preliminary/rejection/rejection_confidence_study_strict_v1/report.md)
 
 Lean mixed-zoo benchmark:
 
-- [report.md](../../../research_runs/lean_mixed_zoo_benchmark/report.md)
-- [retrieval_metrics.csv](../../../research_runs/lean_mixed_zoo_benchmark/retrieval_metrics.csv)
+- [report.md](../../../research_runs/preliminary/retrieval/lean_mixed_zoo_benchmark/report.md)
+- [retrieval_metrics.csv](../../../research_runs/preliminary/retrieval/lean_mixed_zoo_benchmark/retrieval_metrics.csv)
 
 Implementation history:
 
