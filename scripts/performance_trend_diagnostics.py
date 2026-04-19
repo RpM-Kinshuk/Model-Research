@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 from spectral_research.prediction import PERFORMANCE_TARGETS, build_prediction_dataset
 from spectral_research.trend_diagnostics import (
     ANALYSIS_COLUMNS,
+    BUCKET_ORDER,
     TREND_FEATURE_COLUMNS,
     analyze_trend_rows,
     build_absolute_trend_frame,
@@ -96,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
     results: list[pd.DataFrame] = []
     for analysis_name, feature_columns, target_columns in _analysis_inputs():
         table = table_map[analysis_name]
-        for bucket_name in ("all_scored", "heterogeneous"):
+        for bucket_name in BUCKET_ORDER:
             for use_structural_controls in (False, True):
                 results.append(
                     analyze_trend_rows(
@@ -119,7 +120,20 @@ def main(argv: list[str] | None = None) -> int:
     _write(exact_parent, args.output_dir / "exact_parent_delta_dataset.csv")
     _write(family_relative, args.output_dir / "family_relative_delta_dataset.csv")
     _write(result_frame, args.output_dir / "trend_results.csv")
-    (args.output_dir / "report.md").write_text(render_trend_report(result_frame), encoding="utf-8")
+    bucket_value_counts = absolute["query_bucket"].value_counts()
+    ordered_buckets = [
+        *BUCKET_ORDER,
+        *sorted(bucket for bucket in bucket_value_counts.index if bucket not in BUCKET_ORDER),
+    ]
+    bucket_counts = {
+        bucket: int(bucket_value_counts[bucket])
+        for bucket in ordered_buckets
+        if bucket in bucket_value_counts
+    }
+    (args.output_dir / "report.md").write_text(
+        render_trend_report(result_frame, bucket_counts=bucket_counts),
+        encoding="utf-8",
+    )
 
     print(f"Outputs written to: {args.output_dir}")
     return 0

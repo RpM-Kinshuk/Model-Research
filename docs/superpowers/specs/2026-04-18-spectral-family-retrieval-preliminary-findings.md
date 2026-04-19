@@ -509,11 +509,13 @@ Outputs: [report.md](/scratch/kinshuk/Model-Research/.worktrees/spectral-family-
 
 `structural_adjusted` means adjusted/partial Spearman against the structural controls.
 
-The strongest absolute-trend row is still a small heterogeneous slice: `MMLU-PRO` with `trend_global_end_minus_start` under raw Spearman (`0.503`, `n=21`), while the adjusted absolute rows are smaller and the slice is thin.
+The managed `supported_candidate` slice should be read first. It now shows the clearest absolute-trend associations: structural-adjusted `trend_global_mean` vs `Average ⬆️` (`0.604`, `n=41`), plus `trend_global_start` vs `MMLU-PRO` (`0.646`, `n=41`) and `MATH Lvl 5` (`0.649`, `n=41`).
 
-Exact-parent support is present but mostly small-sample: the strongest row is heterogeneous `MATH Lvl 5_delta` on `trend_global_mean_delta` (`-0.876`, `n=12`), and the broader all-scored exact-parent rows are much weaker.
+Exact-parent support exists on that managed slice but remains small-sample: the best `supported_candidate` row is `MATH Lvl 5_delta` on `trend_global_start_delta` (`0.575`, `n=13`).
 
-Family-relative support is broader but still noisy: the strongest rows are heterogeneous `Average ⬆️_delta` on `trend_global_end_minus_start_delta` (`-0.728`, `n=18`) and `trend_global_start_delta` (`0.690`, `n=18`).
+Family-relative support on the managed slice is weak/noisy: the best `supported_candidate` rows are only `0.179` for `Average ⬆️_delta`, `0.099` for `MATH Lvl 5_delta`, and `-0.163` for `MMLU-PRO_delta` (`n=41`).
+
+`heterogeneous` remains useful as broader context and still produces larger-magnitude small-sample rows, but `all_scored` is a mixed-zoo aggregate (`41` supported-candidate, `21` heterogeneous, `97` unsupported-special, `215` unsupported-unknown) and is dominated by unsupported buckets, so it should stay secondary.
 
 Trend-style signals should stay only as a secondary feature family. The rerun is coherent enough to keep them in the background, but not strong enough to move them ahead of the zoo-management-first focus.
 

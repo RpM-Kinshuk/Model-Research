@@ -1,44 +1,47 @@
 # Performance Trend Diagnostics
 
-## Top Absolute-Trend Rows By Target
+## Top Absolute-Trend Rows By Target And Bucket
 | bucket | target | feature | control_mode | n | spearman |
 | --- | --- | --- | --- | --- | --- |
+| supported_candidate | Average ⬆️ | trend_global_mean | structural_adjusted | 41 | 0.604 |
+| supported_candidate | MATH Lvl 5 | trend_global_start | structural_adjusted | 41 | 0.649 |
+| supported_candidate | MMLU-PRO | trend_global_start | structural_adjusted | 41 | 0.646 |
 | heterogeneous | Average ⬆️ | trend_global_start | raw | 21 | 0.357 |
-| heterogeneous | Average ⬆️ | trend_global_end | structural_adjusted | 21 | -0.338 |
+| heterogeneous | MATH Lvl 5 | trend_global_start | raw | 21 | 0.461 |
+| heterogeneous | MMLU-PRO | trend_global_end_minus_start | raw | 21 | 0.503 |
 | all_scored | Average ⬆️ | trend_global_start | structural_adjusted | 374 | 0.256 |
 | all_scored | MATH Lvl 5 | trend_global_start | structural_adjusted | 374 | 0.468 |
-| heterogeneous | MATH Lvl 5 | trend_global_start | raw | 21 | 0.461 |
-| all_scored | MATH Lvl 5 | trend_global_start | raw | 374 | 0.453 |
-| heterogeneous | MMLU-PRO | trend_global_end_minus_start | raw | 21 | 0.503 |
-| heterogeneous | MMLU-PRO | trend_global_start | structural_adjusted | 21 | -0.475 |
-| heterogeneous | MMLU-PRO | trend_global_end_minus_start | structural_adjusted | 21 | 0.453 |
+| all_scored | MMLU-PRO | trend_global_start | structural_adjusted | 374 | 0.199 |
 
-## Top Exact-Parent Rows By Target
+## Top Exact-Parent Rows By Target And Bucket
 | bucket | target | feature | control_mode | n | spearman |
 | --- | --- | --- | --- | --- | --- |
+| supported_candidate | Average ⬆️_delta | trend_global_end_minus_start_delta | structural_adjusted | 13 | 0.278 |
+| supported_candidate | MATH Lvl 5_delta | trend_global_start_delta | structural_adjusted | 13 | 0.575 |
+| supported_candidate | MMLU-PRO_delta | trend_global_end_delta | structural_adjusted | 13 | 0.263 |
 | heterogeneous | Average ⬆️_delta | trend_global_mean_delta | structural_adjusted | 12 | -0.871 |
-| heterogeneous | Average ⬆️_delta | trend_global_mean_delta | raw | 12 | -0.748 |
-| heterogeneous | Average ⬆️_delta | trend_global_end_delta | structural_adjusted | 12 | -0.660 |
 | heterogeneous | MATH Lvl 5_delta | trend_global_mean_delta | structural_adjusted | 12 | -0.876 |
-| heterogeneous | MATH Lvl 5_delta | trend_global_mean_delta | raw | 12 | -0.790 |
-| heterogeneous | MATH Lvl 5_delta | trend_global_end_delta | structural_adjusted | 12 | -0.741 |
 | heterogeneous | MMLU-PRO_delta | trend_global_end_delta | structural_adjusted | 12 | 0.561 |
-| heterogeneous | MMLU-PRO_delta | trend_global_end_minus_start_delta | raw | 12 | -0.357 |
-| heterogeneous | MMLU-PRO_delta | trend_global_start_delta | raw | 12 | 0.280 |
+| all_scored | Average ⬆️_delta | trend_global_end_minus_start_delta | structural_adjusted | 71 | 0.127 |
+| all_scored | MATH Lvl 5_delta | trend_global_start_delta | structural_adjusted | 71 | 0.157 |
+| all_scored | MMLU-PRO_delta | trend_global_start_delta | raw | 71 | 0.266 |
 
-## Top Family-Relative Rows By Target
+## Top Family-Relative Rows By Target And Bucket
 | bucket | target | feature | control_mode | n | spearman |
 | --- | --- | --- | --- | --- | --- |
+| supported_candidate | Average ⬆️_delta | trend_global_end_minus_start_delta | structural_adjusted | 41 | 0.179 |
+| supported_candidate | MATH Lvl 5_delta | trend_global_end_minus_start_delta | structural_adjusted | 41 | 0.099 |
+| supported_candidate | MMLU-PRO_delta | trend_global_mean_delta | raw | 41 | -0.163 |
 | heterogeneous | Average ⬆️_delta | trend_global_end_minus_start_delta | structural_adjusted | 18 | -0.728 |
-| heterogeneous | Average ⬆️_delta | trend_global_end_minus_start_delta | raw | 18 | -0.725 |
-| heterogeneous | Average ⬆️_delta | trend_global_start_delta | structural_adjusted | 18 | 0.690 |
 | heterogeneous | MATH Lvl 5_delta | trend_global_end_minus_start_delta | raw | 18 | -0.507 |
-| heterogeneous | MATH Lvl 5_delta | trend_global_end_minus_start_delta | structural_adjusted | 18 | -0.506 |
-| heterogeneous | MATH Lvl 5_delta | trend_global_start_delta | structural_adjusted | 18 | 0.454 |
 | heterogeneous | MMLU-PRO_delta | trend_global_mean_delta | raw | 18 | -0.467 |
-| heterogeneous | MMLU-PRO_delta | trend_global_mean_delta | structural_adjusted | 18 | -0.447 |
-| heterogeneous | MMLU-PRO_delta | trend_global_start_delta | raw | 18 | -0.170 |
+| all_scored | Average ⬆️_delta | trend_global_start_delta | structural_adjusted | 155 | 0.152 |
+| all_scored | MATH Lvl 5_delta | trend_global_end_delta | structural_adjusted | 155 | 0.095 |
+| all_scored | MMLU-PRO_delta | trend_global_start_delta | structural_adjusted | 155 | 0.157 |
 
 ## Notes
+- `supported_candidate` is the primary managed slice and should be read first.
+- `heterogeneous` is the broader cross-zoo context slice.
+- `all_scored` is a mixed-zoo aggregate across every scored row, so it should be read as context rather than the primary managed slice (current composition: `supported_candidate`=41, `heterogeneous`=21, `unsupported_special`=97, `unsupported_unknown`=215).
 - Exact-parent and family-relative evidence are reported separately on purpose.
 - Raw and lightweight structural-adjusted variants are both included when enough rows are available.

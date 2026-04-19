@@ -14,6 +14,7 @@ TREND_FEATURE_COLUMNS = (
     "trend_global_end",
     "trend_global_end_minus_start",
 )
+BUCKET_ORDER = ("supported_candidate", "heterogeneous", "all_scored")
 EXACT_PARENT_RELATIONS = {"finetune"}
 ANALYSIS_COLUMNS = (
     "analysis",
@@ -322,22 +323,40 @@ def _markdown_table(frame: pd.DataFrame, columns: list[str]) -> str:
     return "\n".join([header, separator, *rows])
 
 
-def render_trend_report(results: pd.DataFrame) -> str:
+def _bucket_composition_note(bucket_counts: dict[str, int] | None) -> str:
+    if not bucket_counts:
+        return "- `all_scored` is a mixed-zoo aggregate across every scored row, so it should be read as context rather than the primary managed slice."
+
+    parts = [f"`{bucket}`={count}" for bucket, count in bucket_counts.items()]
+    return (
+        "- `all_scored` is a mixed-zoo aggregate across every scored row, so it should be read as context rather than the primary managed slice"
+        f" (current composition: {', '.join(parts)})."
+    )
+
+
+def render_trend_report(
+    results: pd.DataFrame,
+    *,
+    bucket_counts: dict[str, int] | None = None,
+) -> str:
     if results.empty or "analysis" not in results.columns:
         return "\n".join(
             [
                 "# Performance Trend Diagnostics",
                 "",
-                "## Top Absolute-Trend Rows By Target",
+                "## Top Absolute-Trend Rows By Target And Bucket",
                 "_No rows._",
                 "",
-                "## Top Exact-Parent Rows By Target",
+                "## Top Exact-Parent Rows By Target And Bucket",
                 "_No rows._",
                 "",
-                "## Top Family-Relative Rows By Target",
+                "## Top Family-Relative Rows By Target And Bucket",
                 "_No rows._",
                 "",
                 "## Notes",
+                "- `supported_candidate` is the primary managed slice and should be read first.",
+                "- `heterogeneous` is the broader cross-zoo context slice.",
+                _bucket_composition_note(bucket_counts),
                 "- Exact-parent and family-relative evidence are reported separately on purpose.",
                 "- Raw and lightweight structural-adjusted variants are both included when enough rows are available.",
             ]
@@ -347,12 +366,20 @@ def render_trend_report(results: pd.DataFrame) -> str:
         subset = results.loc[results["analysis"].eq(analysis)].copy()
         if subset.empty:
             return subset
+        subset = subset.loc[subset["bucket"].isin(BUCKET_ORDER)].copy()
+        if subset.empty:
+            return subset
         subset["abs_spearman"] = subset["spearman"].abs()
+        subset["bucket_order"] = subset["bucket"].map({bucket: index for index, bucket in enumerate(BUCKET_ORDER)})
         return (
-            subset.sort_values(["target", "abs_spearman", "spearman"], ascending=[True, False, False])
-            .groupby("target", as_index=False)
-            .head(3)
-            .drop(columns=["abs_spearman"])
+            subset.sort_values(
+                ["bucket_order", "target", "abs_spearman", "spearman"],
+                ascending=[True, True, False, False],
+            )
+            .groupby(["bucket", "target"], as_index=False, sort=False)
+            .head(1)
+            .sort_values(["bucket_order", "target"], ascending=[True, True])
+            .drop(columns=["abs_spearman", "bucket_order"])
             .reset_index(drop=True)
         )
 
@@ -360,25 +387,28 @@ def render_trend_report(results: pd.DataFrame) -> str:
         [
             "# Performance Trend Diagnostics",
             "",
-            "## Top Absolute-Trend Rows By Target",
+            "## Top Absolute-Trend Rows By Target And Bucket",
             _markdown_table(
                 best_rows("absolute"),
                 ["bucket", "target", "feature", "control_mode", "n", "spearman"],
             ),
             "",
-            "## Top Exact-Parent Rows By Target",
+            "## Top Exact-Parent Rows By Target And Bucket",
             _markdown_table(
                 best_rows("exact_parent"),
                 ["bucket", "target", "feature", "control_mode", "n", "spearman"],
             ),
             "",
-            "## Top Family-Relative Rows By Target",
+            "## Top Family-Relative Rows By Target And Bucket",
             _markdown_table(
                 best_rows("family_relative"),
                 ["bucket", "target", "feature", "control_mode", "n", "spearman"],
             ),
             "",
             "## Notes",
+            "- `supported_candidate` is the primary managed slice and should be read first.",
+            "- `heterogeneous` is the broader cross-zoo context slice.",
+            _bucket_composition_note(bucket_counts),
             "- Exact-parent and family-relative evidence are reported separately on purpose.",
             "- Raw and lightweight structural-adjusted variants are both included when enough rows are available.",
         ]

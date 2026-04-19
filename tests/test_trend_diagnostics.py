@@ -399,21 +399,57 @@ class TrendDiagnosticsAnalysisTests(unittest.TestCase):
         self.assertGreater(float(raw.iloc[0]["spearman"]), 0.8)
         self.assertLess(float(adjusted.iloc[0]["spearman"]), -0.8)
 
-    def test_render_trend_report_includes_three_sections(self) -> None:
+    def test_render_trend_report_includes_top_row_per_target_and_bucket(self) -> None:
         rows = pd.DataFrame(
             [
+                {
+                    "analysis": "absolute",
+                    "bucket": "supported_candidate",
+                    "target": "MMLU-PRO",
+                    "feature": "trend_global_start",
+                    "control_mode": "raw",
+                    "n": 18,
+                    "spearman": 0.4,
+                },
+                {
+                    "analysis": "absolute",
+                    "bucket": "supported_candidate",
+                    "target": "MMLU-PRO",
+                    "feature": "trend_global_end_minus_start",
+                    "control_mode": "structural_adjusted",
+                    "n": 18,
+                    "spearman": 0.6,
+                },
+                {
+                    "analysis": "absolute",
+                    "bucket": "heterogeneous",
+                    "target": "MMLU-PRO",
+                    "feature": "trend_global_end_minus_start",
+                    "control_mode": "raw",
+                    "n": 5,
+                    "spearman": 0.7,
+                },
+                {
+                    "analysis": "absolute",
+                    "bucket": "all_scored",
+                    "target": "MMLU-PRO",
+                    "feature": "trend_global_mean",
+                    "control_mode": "raw",
+                    "n": 120,
+                    "spearman": 0.3,
+                },
                 {
                     "analysis": "absolute",
                     "bucket": "all_scored",
                     "target": "MMLU-PRO",
                     "feature": "trend_global_end_minus_start",
                     "control_mode": "raw",
-                    "n": 12,
+                    "n": 120,
                     "spearman": 0.5,
                 },
                 {
                     "analysis": "exact_parent",
-                    "bucket": "all_scored",
+                    "bucket": "supported_candidate",
                     "target": "MMLU-PRO",
                     "feature": "trend_global_end_minus_start_delta",
                     "control_mode": "raw",
@@ -435,10 +471,23 @@ class TrendDiagnosticsAnalysisTests(unittest.TestCase):
         report = render_trend_report(rows)
 
         self.assertIn("# Performance Trend Diagnostics", report)
-        self.assertIn("## Top Absolute-Trend Rows By Target", report)
-        self.assertIn("## Top Exact-Parent Rows By Target", report)
-        self.assertIn("## Top Family-Relative Rows By Target", report)
+        self.assertIn("## Top Absolute-Trend Rows By Target And Bucket", report)
+        self.assertIn("## Top Exact-Parent Rows By Target And Bucket", report)
+        self.assertIn("## Top Family-Relative Rows By Target And Bucket", report)
         self.assertIn("| bucket | target | feature | control_mode | n | spearman |", report)
+        self.assertIn("| supported_candidate | MMLU-PRO | trend_global_end_minus_start | structural_adjusted | 18 | 0.600 |", report)
+        self.assertIn("| heterogeneous | MMLU-PRO | trend_global_end_minus_start | raw | 5 | 0.700 |", report)
+        self.assertIn("| all_scored | MMLU-PRO | trend_global_end_minus_start | raw | 120 | 0.500 |", report)
+        self.assertNotIn("| supported_candidate | MMLU-PRO | trend_global_start | raw | 18 | 0.400 |", report)
+        self.assertLess(
+            report.index("| supported_candidate | MMLU-PRO | trend_global_end_minus_start | structural_adjusted | 18 | 0.600 |"),
+            report.index("| heterogeneous | MMLU-PRO | trend_global_end_minus_start | raw | 5 | 0.700 |"),
+        )
+        self.assertLess(
+            report.index("| heterogeneous | MMLU-PRO | trend_global_end_minus_start | raw | 5 | 0.700 |"),
+            report.index("| all_scored | MMLU-PRO | trend_global_end_minus_start | raw | 120 | 0.500 |"),
+        )
+        self.assertIn("mixed-zoo aggregate", report)
         self.assertNotIn("r2", report)
         self.assertNotIn("mae", report)
 
@@ -496,6 +545,38 @@ class PerformanceTrendDiagnosticsCliTests(unittest.TestCase):
                     "MATH Lvl 5": 6.0,
                 },
                 {
+                    "model_id": "peer-supported-c",
+                    "display_name": "repo/peer-supported-c",
+                    "source_model": "",
+                    "base_model_relation": "",
+                    "audited_base_family": "fam/b",
+                    "candidate_family": "fam/b",
+                    "query_bucket": "supported_candidate",
+                    "common_schema": True,
+                    "schema_name": "common_llm_7",
+                    "num_layers": 3,
+                    "raw_module_count": 3,
+                    "Average ⬆️": 12.0,
+                    "MMLU-PRO": 13.0,
+                    "MATH Lvl 5": 14.0,
+                },
+                {
+                    "model_id": "peer-supported-d",
+                    "display_name": "repo/peer-supported-d",
+                    "source_model": "",
+                    "base_model_relation": "",
+                    "audited_base_family": "fam/c",
+                    "candidate_family": "fam/c",
+                    "query_bucket": "supported_candidate",
+                    "common_schema": True,
+                    "schema_name": "common_llm_7",
+                    "num_layers": 4,
+                    "raw_module_count": 4,
+                    "Average ⬆️": 18.0,
+                    "MMLU-PRO": 19.0,
+                    "MATH Lvl 5": 21.0,
+                },
+                {
                     "model_id": "peer-c",
                     "display_name": "repo/peer-c",
                     "source_model": "",
@@ -538,6 +619,22 @@ class PerformanceTrendDiagnosticsCliTests(unittest.TestCase):
                 ("self_attn.q_proj", "mlp.down_proj"),
                 np.array([[0.5, 1.5], [1.5, 2.5]], dtype=float),
             ),
+            "peer-supported-c": AlphaRecord(
+                "peer-supported-c",
+                "repo/peer-supported-c",
+                "/tmp/peer-supported-c",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[1.25, 2.25], [2.25, 3.25]], dtype=float),
+            ),
+            "peer-supported-d": AlphaRecord(
+                "peer-supported-d",
+                "repo/peer-supported-d",
+                "/tmp/peer-supported-d",
+                2,
+                ("self_attn.q_proj", "mlp.down_proj"),
+                np.array([[2.5, 3.5], [3.5, 4.5]], dtype=float),
+            ),
             "peer-c": AlphaRecord(
                 "peer-c",
                 "repo/peer-c",
@@ -572,6 +669,7 @@ class PerformanceTrendDiagnosticsCliTests(unittest.TestCase):
                 list(results.columns),
                 ["analysis", "bucket", "target", "feature", "control_mode", "n", "spearman"],
             )
+            self.assertTrue(results["bucket"].eq("supported_candidate").any())
 
             exact_parent = pd.read_csv(output_dir / "exact_parent_delta_dataset.csv")
             self.assertIn("source_model", exact_parent.columns)
