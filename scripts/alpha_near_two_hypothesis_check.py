@@ -46,12 +46,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--common-matched-csv",
         type=Path,
-        default=REPO_ROOT / "research_runs" / "legacy" / "csv_common_schema_research" / "matched_common_schema_models.csv",
+        default=REPO_ROOT / "research_runs" / "legacy" / "common_schema_performance_research" / "matched_common_schema_models.csv",
     )
     parser.add_argument(
         "--module-features-csv",
         type=Path,
-        default=REPO_ROOT / "research_runs" / "legacy" / "csv_common_schema_research" / "common_schema_module_features.csv",
+        default=REPO_ROOT / "research_runs" / "legacy" / "common_schema_performance_research" / "common_schema_module_features.csv",
     )
     parser.add_argument(
         "--output-dir",
