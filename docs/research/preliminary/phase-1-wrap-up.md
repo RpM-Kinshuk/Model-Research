@@ -32,13 +32,13 @@ Canonical reader-facing docs:
 - [Artifact Index](./artifact-index.md)
 - [Experiment Family](./experiment-family.md)
 
-Canonical grouped artifact roots:
+Model-Research preliminary research artifact roots:
 
 - `research_runs/preliminary/retrieval/`
 - `research_runs/preliminary/rejection/`
 - `research_runs/preliminary/prediction/`
 
-Support-only grouped roots:
+Support-only preliminary research artifact roots:
 
 - `research_runs/preliminary/optimization/`
 - `research_runs/preliminary/exploratory/`
