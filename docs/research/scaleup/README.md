@@ -14,4 +14,8 @@ Operational source of truth:
 
 `Model-Research` owns the phase-3 experiments and reports that consume those operational inputs.
 
+For the actual phase-2 run shape, use:
+
+- `Model-Zoo/docs/operations/analysis.md`
+
 Use this directory for scale-up-facing research notes, summaries, and report links. Do not treat it as the canonical home for curated tables or analysis outputs.
