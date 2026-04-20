@@ -209,5 +209,8 @@ __marimo__/
 # Local git worktrees
 .worktrees/
 
+# Nested operational repo
+Model-Zoo/
+
 # Large data files
 large_nlp_data.json
