@@ -64,9 +64,16 @@ These points should stay explicit and should not be upgraded during scale-up unl
 
 ## What Phase 2 Starts With
 
-Phase 2 should begin with data curation for the larger model pool.
+Phase 2 should begin with data curation for the larger model pool in `Model-Zoo`.
 
 The point is not to invent a new experiment family. The point is to scale the same family of experiments onto a larger and better-curated set of models while keeping the current method hierarchy stable.
+
+Operational source of truth:
+
+- curated tables: `Model-Zoo/data/curated/`
+- analysis outputs: `Model-Zoo/analysis_runs/phase2/`
+
+`Model-Research` remains the phase-3 experimental consumer and report layer.
 
 So phase 2 should start with:
 
@@ -77,7 +84,7 @@ So phase 2 should start with:
 
 ## Immediate Next Step
 
-The next work item is:
+The next work item is the scale-up handoff:
 
 `prepare the scale-up/data-curation phase without reopening the phase-1 method story`
 
@@ -87,5 +94,8 @@ That means:
 - keep the phase-1 artifact set fixed
 - define what new data must be curated for scale-up
 - rerun the same experiment family on the larger pool
+- read curated inputs from `Model-Zoo/data/curated/`
+- write analysis outputs under `Model-Zoo/analysis_runs/phase2/`
+- keep `Model-Research` focused on phase-3 experiments and reports
 
 This is the clean handoff point between the preliminary phase and the scale-up phase.

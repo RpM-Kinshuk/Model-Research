@@ -10,6 +10,14 @@ Core documents:
 - [Paper Outline](./preliminary-paper-outline.md)
 - [Artifact Index](./artifact-index.md)
 - [Experiment Family](./experiment-family.md)
+- [Scale-up README](../scaleup/README.md)
 
-This directory is the reader-facing entrypoint for the preliminary study.
+This directory is the reader-facing entrypoint for the preliminary study and the phase-3 experimental consumer layer.
+
+Operational source of truth:
+
+- curated tables: `Model-Zoo/data/curated/`
+- analysis outputs: `Model-Zoo/analysis_runs/phase2/`
+
+`Model-Research` owns the phase-3 experiments and reports that read from those operational inputs.
 Process history remains in `docs/superpowers/`.

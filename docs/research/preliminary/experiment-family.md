@@ -10,14 +10,19 @@ This preliminary phase keeps one fixed experiment family:
 
 Out-of-scope for this phase:
 
-- data-curation redesign
-- output-contract redesign
+- data-curation redesign in `Model-Research`
+- output-contract redesign in `Model-Research`
 - replacing `alpha_cluster_dashboard/`
 - new large method families beyond the current ones
 
 ## Grouped Artifact Layout
 
-The preliminary runs are organized by purpose under these canonical roots and support areas:
+The preliminary runs are organized by purpose under these canonical roots and support areas.
+The operational inputs for the larger curated pool live in `Model-Zoo/data/curated/`, and the operational analysis outputs live in `Model-Zoo/analysis_runs/phase2/`.
+
+`Model-Research` stays the phase-3 experimental consumer and report layer.
+
+Canonical preliminary roots:
 
 - `research_runs/preliminary/retrieval/`
 - `research_runs/preliminary/rejection/`
