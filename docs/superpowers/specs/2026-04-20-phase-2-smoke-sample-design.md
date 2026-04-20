@@ -20,9 +20,9 @@ It should **not**:
 
 ## Recommendation
 
-Use a tiny sandbox under `Model-Zoo`:
+Use a tiny manual sandbox outside the tracked `Model-Zoo` repo surface, for example:
 
-- `Model-Zoo/sandbox/phase2_smoke/`
+- `/tmp/model_zoo_phase2_smoke/`
 
 Put only two things there:
 
@@ -87,11 +87,11 @@ If a type bucket is small, just take what is available up to its proportional sh
 
 Write the sample to:
 
-- `Model-Zoo/sandbox/phase2_smoke/smoke_100_mixed_v1.csv`
+- `/tmp/model_zoo_phase2_smoke/smoke_100_mixed_v1.csv`
 
 Write one small summary artifact next to it, for example:
 
-- `Model-Zoo/sandbox/phase2_smoke/smoke_100_mixed_v1_summary.md`
+- `/tmp/model_zoo_phase2_smoke/smoke_100_mixed_v1_summary.md`
 
 The summary should include:
 
@@ -103,7 +103,7 @@ The summary should include:
 
 ## Human Workflow
 
-The sandbox README should make the next step obvious.
+The sandbox README should make the next step obvious and keep the workflow easy to inspect by hand.
 
 It should contain:
 
@@ -117,6 +117,16 @@ It should contain:
    - failure reasons by `loader_scenario`
 
 But the README should stop short of actually starting the run.
+
+## Tracking Rule
+
+This smoke-sample workflow is intentionally **not** part of the committed `Model-Zoo` repo surface.
+
+That means:
+
+- do not commit the sandbox files into `Model-Zoo`
+- do not add a new `.gitignore` rule for them
+- keep the sandbox easy to inspect and remove manually
 
 ## Keep / Kill Rules
 
