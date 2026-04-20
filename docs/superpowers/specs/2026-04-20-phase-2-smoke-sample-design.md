@@ -20,9 +20,10 @@ It should **not**:
 
 ## Recommendation
 
-Use a tiny manual sandbox outside the tracked `Model-Zoo` repo surface, for example:
+Use a tiny manual sandbox that does not pollute committed repo state, for example:
 
 - `/tmp/model_zoo_phase2_smoke/`
+- or a small gitignored local sandbox if that is more convenient
 
 Put only two things there:
 
@@ -85,7 +86,7 @@ If a type bucket is small, just take what is available up to its proportional sh
 
 ## Output
 
-Write the sample to:
+Write the sample to a disposable sandbox location, for example:
 
 - `/tmp/model_zoo_phase2_smoke/smoke_100_mixed_v1.csv`
 
@@ -125,7 +126,7 @@ This smoke-sample workflow is intentionally **not** part of the committed `Model
 That means:
 
 - do not commit the sandbox files into `Model-Zoo`
-- do not add a new `.gitignore` rule for them
+- using `.gitignore` is acceptable if it helps keep the sandbox local and disposable
 - keep the sandbox easy to inspect and remove manually
 
 ## Keep / Kill Rules
