@@ -2,6 +2,11 @@
 
 This directory tracks the handoff from preliminary research into the scale-up phase.
 
+At a glance:
+
+- Phase 1 curation and Phase 2 analysis are operationalized in `Model-Zoo`
+- Phase 3 experiments and reports live in `Model-Research`
+
 Operational source of truth:
 
 - curated tables: `Model-Zoo/data/curated/`

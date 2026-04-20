@@ -1,3 +1,7 @@
+from pathlib import Path
+
+import pytest
+
 from spectral_research.io_contract import (
     model_zoo_analysis_run_path,
     model_zoo_curated_table_path,
@@ -6,16 +10,22 @@ from spectral_research.io_contract import (
 
 
 def test_model_zoo_root_points_to_nested_repo():
-    assert model_zoo_root().as_posix().endswith("Model-Zoo")
+    expected = Path(__file__).resolve().parents[1] / "Model-Zoo"
+    assert model_zoo_root() == expected
 
 
 def test_model_zoo_curated_table_path_points_to_canonical_location():
-    assert model_zoo_curated_table_path().as_posix().endswith(
-        "Model-Zoo/data/curated/model_zoo_phase2.csv"
-    )
+    path = model_zoo_curated_table_path()
+    assert path == model_zoo_root() / "data" / "curated" / "model_zoo_phase2.csv"
+    assert path.is_file()
 
 
 def test_model_zoo_analysis_run_path_builds_phase2_run_root():
-    assert model_zoo_analysis_run_path("example_run").as_posix().endswith(
-        "Model-Zoo/analysis_runs/phase2/example_run"
-    )
+    path = model_zoo_analysis_run_path("example_run")
+    assert path == model_zoo_root() / "analysis_runs" / "phase2" / "example_run"
+
+
+@pytest.mark.parametrize("run_name", ["", ".", "..", "nested/run", "nested\\run"])
+def test_model_zoo_analysis_run_path_rejects_traversal_like_values(run_name):
+    with pytest.raises(ValueError, match="single path component"):
+        model_zoo_analysis_run_path(run_name)

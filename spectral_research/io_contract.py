@@ -16,4 +16,6 @@ def model_zoo_curated_table_path() -> Path:
 
 
 def model_zoo_analysis_run_path(run_name: str) -> Path:
+    if not run_name or run_name in {".", ".."} or any(sep in run_name for sep in ("/", "\\")):
+        raise ValueError("run_name must be a single path component")
     return MODEL_ZOO_ROOT / "analysis_runs" / "phase2" / run_name
