@@ -73,7 +73,16 @@ Operational source of truth:
 - curated tables: `Model-Zoo/data/curated/`
 - analysis outputs: `Model-Zoo/analysis_runs/phase2/`
 
-`Model-Research` remains the phase-3 experimental consumer and report layer.
+Ownership split:
+
+- `Model-Research` keeps the phase-1 findings, narrative, and reader-facing research artifacts:
+  - `docs/research/preliminary/`
+  - `research_runs/preliminary/`
+- `Model-Zoo` owns the canonical operational scale-up artifacts:
+  - curated tables in `Model-Zoo/data/curated/`
+  - analysis outputs in `Model-Zoo/analysis_runs/phase2/`
+
+`Model-Research` remains the phase-3 experimental consumer and report layer, but it is no longer the canonical home for the scale-up operational artifacts themselves.
 
 So phase 2 should start with:
 

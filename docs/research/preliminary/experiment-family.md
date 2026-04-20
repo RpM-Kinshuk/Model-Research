@@ -18,9 +18,13 @@ Out-of-scope for this phase:
 ## Grouped Artifact Layout
 
 The preliminary runs are organized by purpose under these canonical roots and support areas.
-The operational inputs for the larger curated pool live in `Model-Zoo/data/curated/`, and the operational analysis outputs live in `Model-Zoo/analysis_runs/phase2/`.
+The stable scale-up inputs are:
+
+- curated table: `Model-Zoo/data/curated/model_zoo_phase2.csv`
+- analysis output pattern: `Model-Zoo/analysis_runs/phase2/<run_name>/`
 
 `Model-Research` stays the phase-3 experimental consumer and report layer.
+The operational inputs for the larger curated pool live in `Model-Zoo/data/curated/`, and the operational analysis outputs live in `Model-Zoo/analysis_runs/phase2/`.
 
 Canonical preliminary roots:
 
