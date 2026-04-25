@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from fetch_data.build_ablation_dataset import build_ablation_outputs
 
@@ -64,3 +65,37 @@ def test_build_ablation_outputs_combines_optional_results_source(tmp_path: Path)
 
     assert set(outputs["candidates"]["model_id"]) == {"org/content", "org/result"}
     assert set(outputs["selected"]["eval_source"]) == {"open_llm_leaderboard_contents", "open_llm_leaderboard_results"}
+
+
+def test_build_ablation_outputs_requires_phase2_path_before_creating_output_dir(tmp_path: Path):
+    contents_path = tmp_path / "contents.csv"
+    phase2_path = tmp_path / "missing-phase2.csv"
+    output_dir = tmp_path / "ablation"
+
+    pd.DataFrame([{"model_id": "org/content", "Average ⬆️": 1.0}]).to_csv(contents_path, index=False)
+
+    with pytest.raises(FileNotFoundError):
+        build_ablation_outputs(
+            contents_path=contents_path,
+            phase2_path=phase2_path,
+            output_dir=output_dir,
+        )
+
+    assert not output_dir.exists()
+
+
+def test_build_ablation_outputs_requires_contents_path_before_creating_output_dir(tmp_path: Path):
+    contents_path = tmp_path / "missing-contents.csv"
+    phase2_path = tmp_path / "phase2.csv"
+    output_dir = tmp_path / "ablation"
+
+    pd.DataFrame([], columns=["model_id"]).to_csv(phase2_path, index=False)
+
+    with pytest.raises(FileNotFoundError):
+        build_ablation_outputs(
+            contents_path=contents_path,
+            phase2_path=phase2_path,
+            output_dir=output_dir,
+        )
+
+    assert not output_dir.exists()

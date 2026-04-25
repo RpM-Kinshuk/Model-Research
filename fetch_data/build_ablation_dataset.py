@@ -23,6 +23,11 @@ CONTENTS_EVAL_SOURCE = "open_llm_leaderboard_contents"
 RESULTS_EVAL_SOURCE = "open_llm_leaderboard_results"
 
 
+def _require_existing_file(path: Path, label: str) -> None:
+    if not path.is_file():
+        raise FileNotFoundError(f"{label} file does not exist: {path}")
+
+
 def _load_csv(path: Path | None) -> pd.DataFrame:
     if path is None or not path.exists():
         return pd.DataFrame()
@@ -51,6 +56,11 @@ def build_ablation_outputs(
     target_size: int = 5000,
     max_eval_missing_fraction: float = 0.15,
 ) -> dict[str, object]:
+    _require_existing_file(contents_path, "contents")
+    if results_path is not None:
+        _require_existing_file(results_path, "results")
+    _require_existing_file(phase2_path, "phase2")
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     sources = _load_sources(contents_path, results_path)
