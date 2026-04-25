@@ -116,6 +116,43 @@ def test_build_ablation_outputs_merges_metadata_path_before_suitability(tmp_path
     assert outputs["rejected"].loc[0, "rejection_reason"] == "unsupported_artifact_format"
 
 
+def test_build_ablation_outputs_merges_metadata_using_fallback_identifier(tmp_path: Path):
+    contents_path = tmp_path / "contents.csv"
+    metadata_path = tmp_path / "metadata.csv"
+    phase2_path = tmp_path / "phase2.csv"
+    output_dir = tmp_path / "ablation"
+
+    pd.DataFrame([{"fullname": "Owner/Fallback@main", "Average ⬆️": 6.0}]).to_csv(contents_path, index=False)
+    pd.DataFrame(
+        [
+            {
+                "model_id": "Owner/Fallback",
+                "source_model": "Owner/Base",
+                "base_model_relation": "finetune",
+                "pipeline_tag": "text-generation",
+            }
+        ]
+    ).to_csv(metadata_path, index=False)
+    pd.DataFrame([], columns=["model_id"]).to_csv(phase2_path, index=False)
+
+    outputs = build_ablation_outputs(
+        contents_path=contents_path,
+        metadata_path=metadata_path,
+        phase2_path=phase2_path,
+        output_dir=output_dir,
+        target_size=1,
+    )
+
+    candidate = outputs["candidates"].loc[0]
+    selected = outputs["selected"].loc[0]
+    assert candidate["source_model"] == "Owner/Base"
+    assert candidate["base_model_relation"] == "finetune"
+    assert candidate["primary_type_bucket"] == "finetune"
+    assert candidate["lineage_eval_group"] == "same_base_finetune"
+    assert selected["source_model"] == "Owner/Base"
+    assert selected["base_model_relation"] == "finetune"
+
+
 def test_build_ablation_outputs_requires_phase2_path_before_creating_output_dir(tmp_path: Path):
     contents_path = tmp_path / "contents.csv"
     phase2_path = tmp_path / "missing-phase2.csv"

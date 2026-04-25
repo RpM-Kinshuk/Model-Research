@@ -11,6 +11,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fetch_data.ablation_schema import (
+    MODEL_ID_COLUMNS,
     prepare_ablation_candidates,
     select_ablation_rows,
     summarize_ablation_outputs,
@@ -77,18 +78,16 @@ def _join_key(value: object) -> str | None:
 
 def _with_join_key(frame: pd.DataFrame) -> pd.DataFrame:
     result = frame.copy()
-    if "repo_id_norm" in result.columns:
-        repo_values = result["repo_id_norm"]
-    else:
-        repo_values = pd.Series([None] * len(result), index=result.index, dtype="object")
-    if "model_id" in result.columns:
-        model_values = result["model_id"]
-    else:
-        model_values = pd.Series([None] * len(result), index=result.index, dtype="object")
-    result["_metadata_join_key"] = [
-        _join_key(repo_id) or _join_key(model_id)
-        for repo_id, model_id in zip(repo_values, model_values, strict=False)
-    ]
+
+    def row_join_key(row: pd.Series) -> str | None:
+        for column in [*MODEL_ID_COLUMNS, "repo_id_norm"]:
+            if column in row:
+                key = _join_key(row[column])
+                if key:
+                    return key
+        return None
+
+    result["_metadata_join_key"] = result.apply(row_join_key, axis=1) if not result.empty else []
     return result
 
 
