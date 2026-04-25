@@ -55,6 +55,47 @@ def test_normalize_ablation_candidates_marks_partial_and_missing_eval():
     assert normalized.loc[normalized["model_id"] == "org/missing", "eval_status"].item() == "eval_missing"
 
 
+def test_normalize_ablation_candidates_marks_task_scores_without_average_as_eval_present():
+    frame = pd.DataFrame(
+        [
+            {"model_id": "org/partial", "Average ⬆️": None, "IFEval": 50.0},
+            {
+                "model_id": "org/complete",
+                "Average ⬆️": None,
+                "IFEval": 50.0,
+                "BBH": 30.0,
+                "MATH Lvl 5": 10.0,
+                "GPQA": 20.0,
+                "MUSR": 25.0,
+                "MMLU-PRO": 60.0,
+            },
+        ]
+    )
+
+    normalized = normalize_ablation_candidates(frame, eval_source="oll_contents")
+
+    assert normalized.loc[normalized["model_id"] == "org/partial", "eval_coverage_flag"].item() == "partial"
+    assert normalized.loc[normalized["model_id"] == "org/partial", "eval_status"].item() == "eval_present"
+    assert normalized.loc[normalized["model_id"] == "org/complete", "eval_coverage_flag"].item() == "complete"
+    assert normalized.loc[normalized["model_id"] == "org/complete", "eval_status"].item() == "eval_present"
+
+
+def test_normalize_ablation_candidates_materializes_model_id_from_fallback_identifier():
+    frame = pd.DataFrame(
+        [
+            {"fullname": "Owner/Fallback@main", "Average ⬆️": 12.0},
+        ]
+    )
+
+    normalized = normalize_ablation_candidates(frame, eval_source="oll_contents")
+    row = normalized.iloc[0]
+
+    assert row["model_id"] == "Owner/Fallback@main"
+    assert row["repo_id_norm"] == "Owner/Fallback"
+    assert row["revision_norm"] == "main"
+    assert row["canonical_model_key"] == "Owner/Fallback@main"
+
+
 def test_mark_phase2_overlaps_matches_case_insensitive_repo_key_and_sha():
     phase2 = pd.DataFrame(
         [
@@ -91,3 +132,15 @@ def test_classify_esd_suitability_uses_loader_and_lineage_signals():
     assert classify_esd_suitability(moe) == "usable_with_caution"
     assert classify_esd_suitability(gguf) == "separate_or_exclude"
     assert classify_esd_suitability(adapter_missing_base) == "separate_or_exclude"
+
+
+def test_classify_esd_suitability_splits_comma_separated_file_string():
+    row = pd.Series(
+        {
+            "primary_type_bucket": "finetune",
+            "loader_scenario": "standard_transformers",
+            "files": "model.gguf,tokenizer.json",
+        }
+    )
+
+    assert classify_esd_suitability(row) == "separate_or_exclude"

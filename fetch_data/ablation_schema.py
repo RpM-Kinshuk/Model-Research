@@ -60,7 +60,7 @@ def _coverage_flags(task_count: int, average_value: object = None) -> str:
 def _file_names(row: pd.Series) -> list[str]:
     files = row.get("files", [])
     if isinstance(files, str):
-        return [files.strip().lower()] if files.strip() else []
+        return [item.strip().lower() for item in files.split(",") if item.strip()]
     if isinstance(files, (list, tuple, set)):
         return [str(item).strip().lower() for item in files if str(item).strip()]
     return []
@@ -74,6 +74,13 @@ def normalize_ablation_candidates(frame: pd.DataFrame, *, eval_source: str) -> p
     result = frame.copy()
 
     model_values = result.apply(lambda row: _first_text(row, MODEL_ID_COLUMNS), axis=1) if not result.empty else []
+    if "model_id" not in result.columns:
+        result["model_id"] = model_values
+    else:
+        result["model_id"] = [
+            _text(existing) or fallback
+            for existing, fallback in zip(result["model_id"], model_values, strict=False)
+        ]
     repo_revision = [parse_repo_and_revision(value) for value in model_values]
     result["repo_id_norm"] = [item[0] for item in repo_revision]
     result["revision_norm"] = [item[1] for item in repo_revision]
@@ -104,7 +111,7 @@ def normalize_ablation_candidates(frame: pd.DataFrame, *, eval_source: str) -> p
         result["is_multimodal"] = pd.Series(dtype="bool")
     else:
         result = apply_type_taxonomy(result)
-    result.loc[result["eval_coverage_flag"].eq("missing"), "eval_status"] = "eval_missing"
+    result["eval_status"] = result["eval_coverage_flag"].eq("missing").map({True: "eval_missing", False: "eval_present"})
     return result
 
 
