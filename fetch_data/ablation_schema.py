@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 
 from fetch_data.phase2_schema import (
@@ -101,6 +103,8 @@ def normalize_ablation_candidates(frame: pd.DataFrame, *, eval_source: str) -> p
     result["eval_source"] = eval_source
 
     result = add_lineage_flags(result)
+    if "files" in result.columns:
+        result["files"] = result.apply(_file_names, axis=1)
     if result.empty:
         result["primary_type_bucket"] = pd.Series(dtype="object")
         result["loader_scenario"] = pd.Series(dtype="object")
@@ -173,3 +177,178 @@ def classify_esd_suitability(row: pd.Series) -> str:
     if loader_scenario in {"adapter_requires_base", "multimodal_transformers", "quantized_transformers_native"}:
         return "usable_with_caution"
     return "good"
+
+
+def assign_lineage_eval_group(row: pd.Series) -> str:
+    relation = _lower_key(row.get("base_model_relation", ""))
+    if relation == "finetune" and _source_model_known(row):
+        return "same_base_finetune"
+    if relation == "merge" and _source_model_known(row):
+        return "known_merge_family"
+    if relation in {"adapter", "lora", "peft"} and _source_model_known(row):
+        return "adapter_versus_merged_base_pair"
+    if relation == "source":
+        return "base_model_family_variant"
+    return "unrelated_negative_pair"
+
+
+def prepare_ablation_candidates(
+    frame: pd.DataFrame,
+    *,
+    phase2_frame: pd.DataFrame,
+    eval_source: str,
+) -> pd.DataFrame:
+    result = normalize_ablation_candidates(frame, eval_source=eval_source)
+    result["esd_suitability"] = result.apply(classify_esd_suitability, axis=1) if not result.empty else []
+    result["lineage_eval_group"] = result.apply(assign_lineage_eval_group, axis=1) if not result.empty else []
+    result["lineage_source"] = result.get("lineage_source", "metadata")
+    result["lineage_confidence"] = result["known_lineage_flag"].map({True: "medium", False: "unknown"})
+    return mark_phase2_overlaps(result, build_phase2_duplicate_keys(phase2_frame))
+
+
+def _unsupported_reason(row: pd.Series) -> str:
+    loader_scenario = _lower_key(row.get("loader_scenario", ""))
+    files = _file_names(row)
+    if loader_scenario == "quantized_alt_format" or any(name.endswith(SEPARATE_FORMAT_SUFFIXES) for name in files):
+        return "unsupported_artifact_format"
+    if loader_scenario == "adapter_requires_base" and not _source_model_known(row):
+        return "adapter_base_unresolved"
+    availability = _lower_key(row.get("availability_status", row.get("Available on the hub", "")))
+    if availability in {"false", "removed", "private", "gated_denied", "inaccessible"}:
+        return "repo_inaccessible"
+    return "unsafe_for_raw_esd"
+
+
+def _priority_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    result = frame.copy()
+    result["selection_priority"] = (
+        result["eval_status"].eq("eval_present").astype("int64") * 16
+        + result["eval_coverage_flag"].eq("complete").astype("int64") * 8
+        + result["known_lineage_flag"].fillna(False).astype("int64") * 4
+        + result["esd_suitability"].eq("good").astype("int64") * 2
+        + result["primary_type_bucket"].isin({"merge", "adapter", "quantized", "moe"}).astype("int64")
+    )
+    return result.sort_values(
+        ["selection_priority", "primary_type_bucket", "canonical_model_key"],
+        ascending=[False, True, True],
+    ).reset_index(drop=True)
+
+
+def _round_robin_by_type(frame: pd.DataFrame, limit: int) -> pd.DataFrame:
+    if limit <= 0 or frame.empty:
+        return frame.iloc[0:0].copy()
+    cells = {
+        bucket: group.reset_index(drop=True)
+        for bucket, group in frame.groupby("primary_type_bucket", sort=True)
+    }
+    rows: list[dict[str, object]] = []
+    index = 0
+    while len(rows) < limit:
+        progressed = False
+        for bucket in sorted(cells):
+            group = cells[bucket]
+            if index < len(group):
+                rows.append(group.iloc[index].to_dict())
+                progressed = True
+                if len(rows) == limit:
+                    break
+        if not progressed:
+            break
+        index += 1
+    return pd.DataFrame(rows)
+
+
+def select_ablation_rows(
+    candidates: pd.DataFrame,
+    *,
+    target_size: int = 5000,
+    max_eval_missing_fraction: float = 0.15,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if candidates.empty:
+        empty = candidates.copy()
+        empty["rejection_reason"] = []
+        return empty, empty
+
+    working = candidates.copy()
+    working["_row_id"] = range(len(working))
+    working["rejection_reason"] = ""
+
+    phase2_duplicate = working["phase2_overlap"].fillna(False)
+    working.loc[phase2_duplicate, "rejection_reason"] = "phase2_duplicate"
+
+    unsupported = working["rejection_reason"].eq("") & working["esd_suitability"].eq("separate_or_exclude")
+    working.loc[unsupported, "rejection_reason"] = [
+        _unsupported_reason(row)
+        for _, row in working.loc[unsupported].iterrows()
+    ]
+
+    eligible = _priority_frame(working[working["rejection_reason"].eq("")])
+    duplicate_mask = eligible.duplicated(subset=["canonical_model_key"], keep="first")
+    duplicate_row_ids = set(eligible.loc[duplicate_mask, "_row_id"])
+    if duplicate_row_ids:
+        working.loc[
+            working["_row_id"].isin(duplicate_row_ids) & working["rejection_reason"].eq(""),
+            "rejection_reason",
+        ] = "duplicate_lower_priority"
+    eligible = eligible[~duplicate_mask].reset_index(drop=True)
+
+    eval_present = eligible[eligible["eval_status"].eq("eval_present")]
+    eval_missing = eligible[eligible["eval_status"].eq("eval_missing")]
+    present_selected = _round_robin_by_type(eval_present, min(target_size, len(eval_present)))
+    remaining_slots = target_size - len(present_selected)
+    missing_cap = math.floor(target_size * max_eval_missing_fraction)
+    missing_limit = max(0, min(remaining_slots, missing_cap))
+    missing_selected = _round_robin_by_type(eval_missing, missing_limit)
+
+    selected = pd.concat([present_selected, missing_selected], ignore_index=True, sort=False)
+    selected_row_ids = set(selected["_row_id"]) if "_row_id" in selected.columns else set()
+
+    unselected_missing = (
+        working["rejection_reason"].eq("")
+        & working["eval_status"].eq("eval_missing")
+        & ~working["_row_id"].isin(selected_row_ids)
+    )
+    working.loc[unselected_missing, "rejection_reason"] = "missing_eval_over_cap"
+
+    unselected_other = working["rejection_reason"].eq("") & ~working["_row_id"].isin(selected_row_ids)
+    working.loc[unselected_other, "rejection_reason"] = "type_quota_pressure"
+
+    rejected = working[working["rejection_reason"].ne("")].reset_index(drop=True)
+    return (
+        selected.drop(columns=["_row_id"], errors="ignore").reset_index(drop=True),
+        rejected.drop(columns=["_row_id"], errors="ignore").reset_index(drop=True),
+    )
+
+
+def _value_counts(frame: pd.DataFrame, column: str) -> dict[str, int]:
+    if column not in frame.columns or frame.empty:
+        return {}
+    return {
+        str(key): int(value)
+        for key, value in frame[column].fillna("missing").value_counts().sort_index().items()
+    }
+
+
+def summarize_ablation_outputs(
+    candidates: pd.DataFrame,
+    selected: pd.DataFrame,
+    rejected: pd.DataFrame,
+) -> dict[str, object]:
+    selected_count = len(selected)
+    missing_count = int(selected["eval_status"].eq("eval_missing").sum()) if selected_count else 0
+    labelled_count = selected_count - missing_count
+    missing_percentage = round((missing_count / selected_count * 100.0), 4) if selected_count else 0.0
+    phase2_overlap = candidates.get("phase2_overlap", pd.Series(False, index=candidates.index))
+    return {
+        "total_candidate_rows": int(len(candidates)),
+        "selected_rows": int(selected_count),
+        "eval_labelled_rows": int(labelled_count),
+        "missing_eval_rows": int(missing_count),
+        "missing_eval_percentage": missing_percentage,
+        "phase2_overlap_rows": int(phase2_overlap.fillna(False).sum()),
+        "counts_by_primary_type_bucket": _value_counts(selected, "primary_type_bucket"),
+        "counts_by_esd_suitability": _value_counts(selected, "esd_suitability"),
+        "counts_by_lineage_status": _value_counts(selected, "lineage_status"),
+        "counts_by_eval_source": _value_counts(selected, "eval_source"),
+        "top_rejection_reasons": _value_counts(rejected, "rejection_reason"),
+    }

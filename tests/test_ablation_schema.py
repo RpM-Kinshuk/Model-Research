@@ -1,10 +1,14 @@
 import pandas as pd
 
 from fetch_data.ablation_schema import (
+    assign_lineage_eval_group,
     build_phase2_duplicate_keys,
     classify_esd_suitability,
     mark_phase2_overlaps,
     normalize_ablation_candidates,
+    prepare_ablation_candidates,
+    select_ablation_rows,
+    summarize_ablation_outputs,
 )
 
 
@@ -144,3 +148,90 @@ def test_classify_esd_suitability_splits_comma_separated_file_string():
     )
 
     assert classify_esd_suitability(row) == "separate_or_exclude"
+
+
+def test_assign_lineage_eval_group_names_comparable_scenarios():
+    assert assign_lineage_eval_group(pd.Series({"base_model_relation": "finetune", "source_model": "org/base"})) == "same_base_finetune"
+    assert assign_lineage_eval_group(pd.Series({"base_model_relation": "merge", "source_model": "org/base"})) == "known_merge_family"
+    assert assign_lineage_eval_group(pd.Series({"base_model_relation": "adapter", "source_model": "org/base"})) == "adapter_versus_merged_base_pair"
+    assert assign_lineage_eval_group(pd.Series({"base_model_relation": "source", "source_model": "org/base"})) == "base_model_family_variant"
+    assert assign_lineage_eval_group(pd.Series({"base_model_relation": "unknown", "source_model": "unknown"})) == "unrelated_negative_pair"
+
+
+def test_prepare_ablation_candidates_adds_type_lineage_suitability_and_overlap():
+    raw = pd.DataFrame(
+        [
+            {
+                "model_id": "org/new-chat",
+                "source_model": "org/base",
+                "base_model_relation": "finetune",
+                "Type": "chat",
+                "Average ⬆️": 12.0,
+                "pipeline_tag": "text-generation",
+            },
+            {
+                "model_id": "org/old",
+                "source_model": "unknown",
+                "base_model_relation": "unknown",
+                "Average ⬆️": 11.0,
+                "pipeline_tag": "text-generation",
+            },
+        ]
+    )
+    phase2 = pd.DataFrame([{"model_id": "org/old"}])
+
+    prepared = prepare_ablation_candidates(raw, phase2_frame=phase2, eval_source="oll_contents")
+
+    assert prepared.loc[prepared["model_id"] == "org/new-chat", "known_lineage_flag"].item() is True
+    assert prepared.loc[prepared["model_id"] == "org/new-chat", "primary_type_bucket"].item() == "finetune"
+    assert prepared.loc[prepared["model_id"] == "org/new-chat", "esd_suitability"].item() == "good"
+    assert prepared.loc[prepared["model_id"] == "org/old", "phase2_overlap"].item() is True
+
+
+def test_select_ablation_rows_rejects_overlaps_and_caps_missing_eval():
+    raw = pd.DataFrame(
+        [
+            {"model_id": "org/eval-a", "source_model": "org/base", "base_model_relation": "finetune", "Average ⬆️": 1.0},
+            {"model_id": "org/eval-b", "source_model": "org/base", "base_model_relation": "merge", "Average ⬆️": 2.0},
+            {"model_id": "org/missing-a", "source_model": "unknown", "base_model_relation": "unknown", "Average ⬆️": None},
+            {"model_id": "org/missing-b", "source_model": "unknown", "base_model_relation": "unknown", "Average ⬆️": None},
+            {"model_id": "org/phase2", "source_model": "org/base", "base_model_relation": "finetune", "Average ⬆️": 3.0},
+            {"model_id": "org/gguf", "source_model": "org/base", "base_model_relation": "quantized", "Average ⬆️": 4.0, "files": ["model.gguf"]},
+        ]
+    )
+    prepared = prepare_ablation_candidates(
+        raw,
+        phase2_frame=pd.DataFrame([{"model_id": "org/phase2"}]),
+        eval_source="oll_contents",
+    )
+
+    selected, rejected = select_ablation_rows(prepared, target_size=4, max_eval_missing_fraction=0.25)
+
+    assert set(selected["model_id"]) == {"org/eval-a", "org/eval-b", "org/missing-a"}
+    assert selected["eval_status"].eq("eval_missing").sum() == 1
+    assert rejected.loc[rejected["model_id"] == "org/phase2", "rejection_reason"].item() == "phase2_duplicate"
+    assert rejected.loc[rejected["model_id"] == "org/gguf", "rejection_reason"].item() == "unsupported_artifact_format"
+    assert rejected.loc[rejected["model_id"] == "org/missing-b", "rejection_reason"].item() == "missing_eval_over_cap"
+
+
+def test_summarize_ablation_outputs_reports_core_metrics():
+    candidates = prepare_ablation_candidates(
+        pd.DataFrame(
+            [
+                {"model_id": "org/a", "source_model": "org/base", "base_model_relation": "finetune", "Average ⬆️": 1.0},
+                {"model_id": "org/b", "source_model": "unknown", "base_model_relation": "unknown", "Average ⬆️": None},
+            ]
+        ),
+        phase2_frame=pd.DataFrame(),
+        eval_source="oll_contents",
+    )
+    selected, rejected = select_ablation_rows(candidates, target_size=2, max_eval_missing_fraction=0.5)
+
+    summary = summarize_ablation_outputs(candidates, selected, rejected)
+
+    assert summary["total_candidate_rows"] == 2
+    assert summary["selected_rows"] == 2
+    assert summary["eval_labelled_rows"] == 1
+    assert summary["missing_eval_percentage"] == 50.0
+    assert summary["phase2_overlap_rows"] == 0
+    assert summary["counts_by_eval_source"] == {"oll_contents": 2}
