@@ -44,6 +44,9 @@ The curation step can merge local Hugging Face Hub metadata with
 `esd_suitability` as `good`, `usable_with_caution`, or `separate_or_exclude`.
 Outputs are written under `data/ablation/`.
 
+Prerequisite: `data/curated/model_zoo_phase2.csv` must already exist. If it is
+missing, produce it first by running `fetch_data/build_phase2_zoo.py`.
+
 Safe local-file run:
 
 ```bash
