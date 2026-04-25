@@ -18,7 +18,7 @@ BENCHMARK_COLUMNS = ["IFEval", "BBH", "MATH Lvl 5", "GPQA", "MUSR", "MMLU-PRO"]
 MODEL_ID_COLUMNS = ["model_id", "fullname", "leaderboard_repo_id", "atlas_repo_id"]
 SHA_COLUMNS = ["model_sha", "Model sha", "sha", "commit_hash"]
 SEPARATE_FORMAT_SUFFIXES = (".gguf", ".exl2")
-INACCESSIBLE_REPO_VALUES = {"false", "removed", "private", "gated_denied", "inaccessible"}
+INACCESSIBLE_REPO_VALUES = {"false", "removed", "private", "gated", "gated_denied", "inaccessible"}
 
 
 def _text(value: object) -> str:

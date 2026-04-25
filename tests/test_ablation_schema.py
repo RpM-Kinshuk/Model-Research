@@ -155,11 +155,12 @@ def test_prepare_ablation_candidates_excludes_inaccessible_repos():
         [
             {"model_id": "org/removed", "Average ⬆️": 1.0, "availability_status": "removed"},
             {"model_id": "org/private", "Average ⬆️": 2.0, "Available on the hub": False},
+            {"model_id": "org/gated", "Average ⬆️": 3.0, "availability_status": "gated"},
         ]
     )
 
     prepared = prepare_ablation_candidates(raw, phase2_frame=pd.DataFrame(), eval_source="oll_contents")
-    selected, rejected = select_ablation_rows(prepared, target_size=2)
+    selected, rejected = select_ablation_rows(prepared, target_size=3)
 
     assert selected.empty
     assert set(prepared["esd_suitability"]) == {"separate_or_exclude"}
