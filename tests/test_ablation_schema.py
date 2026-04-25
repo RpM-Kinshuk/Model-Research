@@ -150,6 +150,22 @@ def test_classify_esd_suitability_splits_comma_separated_file_string():
     assert classify_esd_suitability(row) == "separate_or_exclude"
 
 
+def test_prepare_ablation_candidates_excludes_inaccessible_repos():
+    raw = pd.DataFrame(
+        [
+            {"model_id": "org/removed", "Average ⬆️": 1.0, "availability_status": "removed"},
+            {"model_id": "org/private", "Average ⬆️": 2.0, "Available on the hub": False},
+        ]
+    )
+
+    prepared = prepare_ablation_candidates(raw, phase2_frame=pd.DataFrame(), eval_source="oll_contents")
+    selected, rejected = select_ablation_rows(prepared, target_size=2)
+
+    assert selected.empty
+    assert set(prepared["esd_suitability"]) == {"separate_or_exclude"}
+    assert set(rejected["rejection_reason"]) == {"repo_inaccessible"}
+
+
 def test_assign_lineage_eval_group_names_comparable_scenarios():
     assert assign_lineage_eval_group(pd.Series({"base_model_relation": "finetune", "source_model": "org/base"})) == "same_base_finetune"
     assert assign_lineage_eval_group(pd.Series({"base_model_relation": "merge", "source_model": "org/base"})) == "known_merge_family"
@@ -210,7 +226,7 @@ def test_select_ablation_rows_rejects_overlaps_and_caps_missing_eval():
         eval_source="oll_contents",
     )
 
-    selected, rejected = select_ablation_rows(prepared, target_size=4, max_eval_missing_fraction=0.25)
+    selected, rejected = select_ablation_rows(prepared, target_size=3, max_eval_missing_fraction=0.5)
 
     assert set(selected["model_id"]) == {"org/eval-a", "org/eval-b", "org/missing-a"}
     assert selected["eval_status"].eq("eval_missing").sum() == 1
@@ -254,6 +270,73 @@ def test_select_ablation_rows_rejects_only_lower_priority_duplicates():
     assert rejected.loc[rejected["model_sha"] == "lower-priority", "rejection_reason"].item() == "duplicate_lower_priority"
 
 
+def test_select_ablation_rows_rejects_lower_priority_sha_duplicates_across_repos():
+    raw = pd.DataFrame(
+        [
+            {
+                "model_id": "org/high",
+                "source_model": "org/base",
+                "base_model_relation": "finetune",
+                "Average ⬆️": 3.0,
+                "IFEval": 1.0,
+                "BBH": 1.0,
+                "MATH Lvl 5": 1.0,
+                "GPQA": 1.0,
+                "MUSR": 1.0,
+                "MMLU-PRO": 1.0,
+                "Model sha": "same-sha",
+            },
+            {
+                "model_id": "org/low",
+                "source_model": "org/base",
+                "base_model_relation": "finetune",
+                "Average ⬆️": 4.0,
+                "Model sha": "same-sha",
+            },
+            {"model_id": "org/other", "source_model": "org/base", "base_model_relation": "merge", "Average ⬆️": 5.0},
+        ]
+    )
+    prepared = prepare_ablation_candidates(raw, phase2_frame=pd.DataFrame(), eval_source="oll_contents")
+
+    selected, rejected = select_ablation_rows(prepared, target_size=2)
+
+    assert set(selected["model_id"]) == {"org/high", "org/other"}
+    assert rejected.loc[rejected["model_id"] == "org/low", "rejection_reason"].item() == "duplicate_lower_priority"
+
+
+def test_select_ablation_rows_prefers_richer_partial_eval_duplicate():
+    raw = pd.DataFrame(
+        [
+            {
+                "model_id": "org/dup",
+                "source_model": "org/base",
+                "base_model_relation": "finetune",
+                "Average ⬆️": 1.0,
+                "IFEval": 1.0,
+                "Model sha": "one-task",
+            },
+            {
+                "model_id": "org/dup",
+                "source_model": "org/base",
+                "base_model_relation": "finetune",
+                "Average ⬆️": 2.0,
+                "IFEval": 1.0,
+                "BBH": 1.0,
+                "MATH Lvl 5": 1.0,
+                "GPQA": 1.0,
+                "MUSR": 1.0,
+                "Model sha": "five-task",
+            },
+        ]
+    )
+    prepared = prepare_ablation_candidates(raw, phase2_frame=pd.DataFrame(), eval_source="oll_contents")
+
+    selected, rejected = select_ablation_rows(prepared, target_size=1)
+
+    assert selected["model_sha"].tolist() == ["five-task"]
+    assert rejected.loc[rejected["model_sha"] == "one-task", "rejection_reason"].item() == "duplicate_lower_priority"
+
+
 def test_select_ablation_rows_marks_unselected_eval_present_as_type_quota_pressure():
     raw = pd.DataFrame(
         [
@@ -269,6 +352,37 @@ def test_select_ablation_rows_marks_unselected_eval_present_as_type_quota_pressu
     assert set(selected["model_id"]) == {"org/a", "org/b"}
     assert rejected.loc[rejected["model_id"] == "org/c", "eval_status"].item() == "eval_present"
     assert rejected.loc[rejected["model_id"] == "org/c", "rejection_reason"].item() == "type_quota_pressure"
+
+
+def test_select_ablation_rows_caps_missing_eval_by_selected_fraction():
+    raw = pd.DataFrame(
+        [
+            {"model_id": "org/eval", "source_model": "org/base", "base_model_relation": "finetune", "Average ⬆️": 1.0},
+            {"model_id": "org/missing-a", "source_model": "unknown", "base_model_relation": "unknown", "Average ⬆️": None},
+            {"model_id": "org/missing-b", "source_model": "unknown", "base_model_relation": "unknown", "Average ⬆️": None},
+        ]
+    )
+    prepared = prepare_ablation_candidates(raw, phase2_frame=pd.DataFrame(), eval_source="oll_contents")
+
+    selected, rejected = select_ablation_rows(prepared, target_size=4, max_eval_missing_fraction=0.25)
+
+    assert selected["model_id"].tolist() == ["org/eval"]
+    assert selected["eval_status"].eq("eval_missing").sum() == 0
+    assert set(rejected["rejection_reason"]) == {"missing_eval_over_cap"}
+
+
+def test_select_ablation_rows_empty_input_returns_distinct_frames():
+    candidates = prepare_ablation_candidates(
+        pd.DataFrame(columns=["model_id", "Average ⬆️"]),
+        phase2_frame=pd.DataFrame(),
+        eval_source="oll_contents",
+    )
+
+    selected, rejected = select_ablation_rows(candidates)
+
+    assert selected.empty
+    assert rejected.empty
+    assert selected is not rejected
 
 
 def test_summarize_ablation_outputs_reports_core_metrics():

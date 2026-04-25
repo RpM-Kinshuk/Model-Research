@@ -18,6 +18,7 @@ BENCHMARK_COLUMNS = ["IFEval", "BBH", "MATH Lvl 5", "GPQA", "MUSR", "MMLU-PRO"]
 MODEL_ID_COLUMNS = ["model_id", "fullname", "leaderboard_repo_id", "atlas_repo_id"]
 SHA_COLUMNS = ["model_sha", "Model sha", "sha", "commit_hash"]
 SEPARATE_FORMAT_SUFFIXES = (".gguf", ".exl2")
+INACCESSIBLE_REPO_VALUES = {"false", "removed", "private", "gated_denied", "inaccessible"}
 
 
 def _text(value: object) -> str:
@@ -70,6 +71,10 @@ def _file_names(row: pd.Series) -> list[str]:
 
 def _source_model_known(row: pd.Series) -> bool:
     return _lower_key(row.get("source_model", "")) not in UNKNOWN_LINEAGE_VALUES
+
+
+def _availability_status(row: pd.Series) -> str:
+    return _lower_key(_first_text(row, ["availability_status", "Available on the hub"]))
 
 
 def normalize_ablation_candidates(frame: pd.DataFrame, *, eval_source: str) -> pd.DataFrame:
@@ -165,6 +170,8 @@ def classify_esd_suitability(row: pd.Series) -> str:
     loader_scenario = _lower_key(row.get("loader_scenario", ""))
     files = _file_names(row)
 
+    if _availability_status(row) in INACCESSIBLE_REPO_VALUES:
+        return "separate_or_exclude"
     if loader_scenario == "quantized_alt_format":
         return "separate_or_exclude"
     if any(name.endswith(SEPARATE_FORMAT_SUFFIXES) for name in files):
@@ -209,13 +216,12 @@ def prepare_ablation_candidates(
 def _unsupported_reason(row: pd.Series) -> str:
     loader_scenario = _lower_key(row.get("loader_scenario", ""))
     files = _file_names(row)
+    if _availability_status(row) in INACCESSIBLE_REPO_VALUES:
+        return "repo_inaccessible"
     if loader_scenario == "quantized_alt_format" or any(name.endswith(SEPARATE_FORMAT_SUFFIXES) for name in files):
         return "unsupported_artifact_format"
     if loader_scenario == "adapter_requires_base" and not _source_model_known(row):
         return "adapter_base_unresolved"
-    availability = _lower_key(row.get("availability_status", row.get("Available on the hub", "")))
-    if availability in {"false", "removed", "private", "gated_denied", "inaccessible"}:
-        return "repo_inaccessible"
     return "unsafe_for_raw_esd"
 
 
@@ -224,6 +230,7 @@ def _priority_frame(frame: pd.DataFrame) -> pd.DataFrame:
     result["selection_priority"] = (
         result["eval_status"].eq("eval_present").astype("int64") * 16
         + result["eval_coverage_flag"].eq("complete").astype("int64") * 8
+        + pd.to_numeric(result["eval_task_count"], errors="coerce").fillna(0).astype("int64")
         + result["known_lineage_flag"].fillna(False).astype("int64") * 4
         + result["esd_suitability"].eq("good").astype("int64") * 2
         + result["primary_type_bucket"].isin({"merge", "adapter", "quantized", "moe"}).astype("int64")
@@ -258,6 +265,26 @@ def _round_robin_by_type(frame: pd.DataFrame, limit: int) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _duplicate_lower_priority_row_ids(frame: pd.DataFrame) -> set[int]:
+    duplicate_row_ids: set[int] = set()
+    for column in ["canonical_model_key", "model_sha"]:
+        keys = frame[column].map(_lower_key) if column in frame.columns else pd.Series("", index=frame.index)
+        duplicate_mask = keys.ne("") & keys.duplicated(keep="first")
+        duplicate_row_ids.update(frame.loc[duplicate_mask, "_row_id"].tolist())
+    return duplicate_row_ids
+
+
+def _missing_selection_limit(labelled_count: int, remaining_slots: int, target_size: int, max_eval_missing_fraction: float) -> int:
+    hard_cap = math.floor(target_size * max_eval_missing_fraction)
+    if max_eval_missing_fraction >= 1:
+        ratio_cap = hard_cap
+    elif max_eval_missing_fraction <= 0 or labelled_count <= 0:
+        ratio_cap = 0
+    else:
+        ratio_cap = math.floor((max_eval_missing_fraction * labelled_count) / (1 - max_eval_missing_fraction))
+    return max(0, min(remaining_slots, hard_cap, ratio_cap))
+
+
 def select_ablation_rows(
     candidates: pd.DataFrame,
     *,
@@ -265,9 +292,11 @@ def select_ablation_rows(
     max_eval_missing_fraction: float = 0.15,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     if candidates.empty:
-        empty = candidates.copy()
-        empty["rejection_reason"] = []
-        return empty, empty
+        selected = candidates.copy()
+        rejected = candidates.copy()
+        selected["rejection_reason"] = []
+        rejected["rejection_reason"] = []
+        return selected, rejected
 
     working = candidates.copy()
     working["_row_id"] = range(len(working))
@@ -283,21 +312,24 @@ def select_ablation_rows(
     ]
 
     eligible = _priority_frame(working[working["rejection_reason"].eq("")])
-    duplicate_mask = eligible.duplicated(subset=["canonical_model_key"], keep="first")
-    duplicate_row_ids = set(eligible.loc[duplicate_mask, "_row_id"])
+    duplicate_row_ids = _duplicate_lower_priority_row_ids(eligible)
     if duplicate_row_ids:
         working.loc[
             working["_row_id"].isin(duplicate_row_ids) & working["rejection_reason"].eq(""),
             "rejection_reason",
         ] = "duplicate_lower_priority"
-    eligible = eligible[~duplicate_mask].reset_index(drop=True)
+    eligible = eligible[~eligible["_row_id"].isin(duplicate_row_ids)].reset_index(drop=True)
 
     eval_present = eligible[eligible["eval_status"].eq("eval_present")]
     eval_missing = eligible[eligible["eval_status"].eq("eval_missing")]
     present_selected = _round_robin_by_type(eval_present, min(target_size, len(eval_present)))
     remaining_slots = target_size - len(present_selected)
-    missing_cap = math.floor(target_size * max_eval_missing_fraction)
-    missing_limit = max(0, min(remaining_slots, missing_cap))
+    missing_limit = _missing_selection_limit(
+        len(present_selected),
+        remaining_slots,
+        target_size,
+        max_eval_missing_fraction,
+    )
     missing_selected = _round_robin_by_type(eval_missing, missing_limit)
 
     selected = pd.concat([present_selected, missing_selected], ignore_index=True, sort=False)
