@@ -185,6 +185,11 @@ def test_prepare_ablation_candidates_adds_type_lineage_suitability_and_overlap()
     assert prepared.loc[prepared["model_id"] == "org/new-chat", "known_lineage_flag"].item() is True
     assert prepared.loc[prepared["model_id"] == "org/new-chat", "primary_type_bucket"].item() == "finetune"
     assert prepared.loc[prepared["model_id"] == "org/new-chat", "esd_suitability"].item() == "good"
+    assert prepared.loc[prepared["model_id"] == "org/new-chat", "lineage_eval_group"].item() == "same_base_finetune"
+    assert prepared.loc[prepared["model_id"] == "org/new-chat", "lineage_source"].item() == "metadata"
+    assert prepared.loc[prepared["model_id"] == "org/new-chat", "lineage_confidence"].item() == "medium"
+    assert prepared.loc[prepared["model_id"] == "org/old", "lineage_eval_group"].item() == "unrelated_negative_pair"
+    assert prepared.loc[prepared["model_id"] == "org/old", "lineage_confidence"].item() == "unknown"
     assert prepared.loc[prepared["model_id"] == "org/old", "phase2_overlap"].item() is True
 
 
@@ -214,12 +219,65 @@ def test_select_ablation_rows_rejects_overlaps_and_caps_missing_eval():
     assert rejected.loc[rejected["model_id"] == "org/missing-b", "rejection_reason"].item() == "missing_eval_over_cap"
 
 
+def test_select_ablation_rows_rejects_only_lower_priority_duplicates():
+    raw = pd.DataFrame(
+        [
+            {
+                "model_id": "org/dup",
+                "source_model": "org/base",
+                "base_model_relation": "finetune",
+                "Average ⬆️": 9.0,
+                "IFEval": 1.0,
+                "BBH": 1.0,
+                "MATH Lvl 5": 1.0,
+                "GPQA": 1.0,
+                "MUSR": 1.0,
+                "MMLU-PRO": 1.0,
+                "Model sha": "higher-priority",
+            },
+            {
+                "model_id": "org/dup",
+                "source_model": "org/base",
+                "base_model_relation": "finetune",
+                "Average ⬆️": 10.0,
+                "Model sha": "lower-priority",
+            },
+            {"model_id": "org/other", "source_model": "org/base", "base_model_relation": "merge", "Average ⬆️": 8.0},
+        ]
+    )
+    prepared = prepare_ablation_candidates(raw, phase2_frame=pd.DataFrame(), eval_source="oll_contents")
+
+    selected, rejected = select_ablation_rows(prepared, target_size=2)
+
+    assert set(selected["model_id"]) == {"org/dup", "org/other"}
+    assert selected.loc[selected["model_id"] == "org/dup", "model_sha"].item() == "higher-priority"
+    assert rejected.loc[rejected["model_sha"] == "lower-priority", "rejection_reason"].item() == "duplicate_lower_priority"
+
+
+def test_select_ablation_rows_marks_unselected_eval_present_as_type_quota_pressure():
+    raw = pd.DataFrame(
+        [
+            {"model_id": "org/a", "source_model": "org/base", "base_model_relation": "finetune", "Average ⬆️": 3.0},
+            {"model_id": "org/b", "source_model": "org/base", "base_model_relation": "finetune", "Average ⬆️": 2.0},
+            {"model_id": "org/c", "source_model": "org/base", "base_model_relation": "finetune", "Average ⬆️": 1.0},
+        ]
+    )
+    prepared = prepare_ablation_candidates(raw, phase2_frame=pd.DataFrame(), eval_source="oll_contents")
+
+    selected, rejected = select_ablation_rows(prepared, target_size=2)
+
+    assert set(selected["model_id"]) == {"org/a", "org/b"}
+    assert rejected.loc[rejected["model_id"] == "org/c", "eval_status"].item() == "eval_present"
+    assert rejected.loc[rejected["model_id"] == "org/c", "rejection_reason"].item() == "type_quota_pressure"
+
+
 def test_summarize_ablation_outputs_reports_core_metrics():
     candidates = prepare_ablation_candidates(
         pd.DataFrame(
             [
                 {"model_id": "org/a", "source_model": "org/base", "base_model_relation": "finetune", "Average ⬆️": 1.0},
                 {"model_id": "org/b", "source_model": "unknown", "base_model_relation": "unknown", "Average ⬆️": None},
+                {"model_id": "org/c", "source_model": "org/base", "base_model_relation": "merge", "Average ⬆️": 2.0},
             ]
         ),
         phase2_frame=pd.DataFrame(),
@@ -229,9 +287,13 @@ def test_summarize_ablation_outputs_reports_core_metrics():
 
     summary = summarize_ablation_outputs(candidates, selected, rejected)
 
-    assert summary["total_candidate_rows"] == 2
+    assert summary["total_candidate_rows"] == 3
     assert summary["selected_rows"] == 2
-    assert summary["eval_labelled_rows"] == 1
-    assert summary["missing_eval_percentage"] == 50.0
+    assert summary["eval_labelled_rows"] == 2
+    assert summary["missing_eval_percentage"] == 0.0
     assert summary["phase2_overlap_rows"] == 0
     assert summary["counts_by_eval_source"] == {"oll_contents": 2}
+    assert summary["counts_by_primary_type_bucket"] == {"finetune": 1, "merge": 1}
+    assert summary["counts_by_esd_suitability"] == {"good": 2}
+    assert summary["counts_by_lineage_status"] == {"known": 2}
+    assert summary["top_rejection_reasons"] == {"missing_eval_over_cap": 1}
