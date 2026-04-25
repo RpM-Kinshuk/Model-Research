@@ -109,11 +109,11 @@ Rows with `eval_coverage_flag = missing` should be capped below 15% and mainly u
 
 Use a simple output layout:
 
-- `data/ablation_5000/ablation_5000_candidates.csv`
-- `data/ablation_5000/ablation_5000_selected.csv`
-- `data/ablation_5000/ablation_5000_rejected.csv`
-- `data/ablation_5000/ablation_5000_overlap_audit.csv`
-- `data/ablation_5000/ablation_5000_summary.json`
+- `data/ablation/ablation_candidates.csv`
+- `data/ablation/ablation_selected.csv`
+- `data/ablation/ablation_rejected.csv`
+- `data/ablation/ablation_overlap_audit.csv`
+- `data/ablation/ablation_summary.json`
 
 The selected CSV should be directly usable by the ESD runner after column normalization.
 
