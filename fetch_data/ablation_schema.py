@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 
 import pandas as pd
 
@@ -19,6 +20,7 @@ MODEL_ID_COLUMNS = ["model_id", "fullname", "leaderboard_repo_id", "atlas_repo_i
 SHA_COLUMNS = ["model_sha", "Model sha", "sha", "commit_hash"]
 SEPARATE_FORMAT_SUFFIXES = (".gguf", ".exl2")
 INACCESSIBLE_REPO_VALUES = {"false", "removed", "private", "gated", "gated_denied", "inaccessible"}
+HF_ROOT_MODEL_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def _text(value: object) -> str:
@@ -77,6 +79,23 @@ def _availability_status(row: pd.Series) -> str:
     return _lower_key(_first_text(row, ["availability_status", "Available on the hub"]))
 
 
+def _parse_ablation_repo_and_revision(model_id: object) -> tuple[str | None, str | None]:
+    repo_id, revision = parse_repo_and_revision(model_id)
+    if repo_id:
+        return repo_id, revision
+
+    value = _text(model_id)
+    if not value:
+        return None, None
+    if "@" in value and not value.startswith("@"):
+        value, revision = value.split("@", 1)
+        value = value.strip()
+        revision = revision.strip() or None
+    if HF_ROOT_MODEL_PATTERN.match(value):
+        return value, revision
+    return None, None
+
+
 def normalize_ablation_candidates(frame: pd.DataFrame, *, eval_source: str) -> pd.DataFrame:
     result = frame.copy()
 
@@ -88,7 +107,7 @@ def normalize_ablation_candidates(frame: pd.DataFrame, *, eval_source: str) -> p
             _text(existing) or fallback
             for existing, fallback in zip(result["model_id"], model_values, strict=False)
         ]
-    repo_revision = [parse_repo_and_revision(value) for value in model_values]
+    repo_revision = [_parse_ablation_repo_and_revision(value) for value in model_values]
     result["repo_id_norm"] = [item[0] for item in repo_revision]
     result["revision_norm"] = [item[1] for item in repo_revision]
     result["model_id_norm"] = [_lower_key(repo_id) for repo_id, _ in repo_revision]

@@ -100,6 +100,17 @@ def test_normalize_ablation_candidates_materializes_model_id_from_fallback_ident
     assert row["canonical_model_key"] == "Owner/Fallback@main"
 
 
+def test_normalize_ablation_candidates_accepts_hf_root_model_ids():
+    frame = pd.DataFrame([{"model_id": "gpt2", "Average ⬆️": 6.39}])
+
+    normalized = normalize_ablation_candidates(frame, eval_source="oll_contents")
+    row = normalized.iloc[0]
+
+    assert row["repo_id_norm"] == "gpt2"
+    assert row["model_id_norm"] == "gpt2"
+    assert row["canonical_model_key"] == "gpt2"
+
+
 def test_mark_phase2_overlaps_matches_case_insensitive_repo_key_and_sha():
     phase2 = pd.DataFrame(
         [
