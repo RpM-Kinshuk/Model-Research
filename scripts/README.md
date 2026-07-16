@@ -27,6 +27,21 @@ This directory keeps the supported current entrypoints for the active preliminar
   - Default output: `research_runs/preliminary/prediction/performance_trend_diagnostics`
   - Support or intermediate diagnostics under the prediction area
 
+### Spectral atlas
+
+- `streamlit run app.py`
+  - Interactive dashboard for clustering, alpha profiles, and prediction-neighborhood visualizations.
+  - Defaults to `output/results/metrics` with the curated phase-2 metadata.
+- `build_ablation_dashboard_cache.py`
+  - Precomputes the persistent atlas cache used by the dashboard.
+  - Default output: `research_runs/preliminary/results/dashboard_cache`
+- `ablation_spectral_analysis.py`
+  - Coverage, metadata, and scalar spectral-feature summary for the ablation collection.
+  - Default output: `research_runs/preliminary/ablation/ablation_spectral_analysis_20260708`
+- `ablation_method_study.py`
+  - Minimal comparison of paper-faithful Spearman, existing alpha baselines, rank-shape variants, a role-wise alpha Wasserstein check, and a structural leakage control.
+  - Default output: `research_runs/preliminary/ablation/ablation_method_study_20260708`
+
 ## Preserved exploratory or legacy helpers
 
 - `alpha_leaderboard_correlation.py`

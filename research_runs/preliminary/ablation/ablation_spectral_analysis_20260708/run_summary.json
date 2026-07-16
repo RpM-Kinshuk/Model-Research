@@ -1,0 +1,14 @@
+{
+  "artifact_without_terminal_rows": 536,
+  "failed_rows": 1051,
+  "metrics_artifact_rate": 0.776788,
+  "metrics_artifact_rows": 3661,
+  "no_terminal_no_artifact_rows": 1,
+  "not_attempted_rows": 537,
+  "selected_rows": 4713,
+  "stats_artifact_rate": 0.776788,
+  "stats_artifact_rows": 3661,
+  "success_rate": 0.66306,
+  "success_rows": 3125,
+  "terminal_status_rows": 4176
+}

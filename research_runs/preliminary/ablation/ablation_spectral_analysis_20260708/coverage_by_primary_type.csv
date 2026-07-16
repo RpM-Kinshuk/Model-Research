@@ -1,0 +1,8 @@
+primary_type_bucket,selected_rows,success_rows,failed_rows,stats_artifact_rows,metrics_artifact_rows,success_rate,stats_artifact_rate
+other_text,3178,2353,644,2534,2534,0.7404027690371303,0.7973568281938326
+finetune,1174,743,233,940,940,0.6328790459965928,0.8006814310051107
+moe,328,29,160,168,168,0.08841463414634146,0.5121951219512195
+merge,30,0,12,18,18,0.0,0.6
+adapter,1,0,1,0,0,0.0,0.0
+multimodal,1,0,0,1,1,0.0,1.0
+quantized,1,0,1,0,0,0.0,0.0

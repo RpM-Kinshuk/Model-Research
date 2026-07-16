@@ -18,6 +18,20 @@ import plotly.express as px
 import plotly.io as pio
 import streamlit as st
 
+from alpha_cluster_dashboard.ablation import (
+    DEFAULT_ABLATION_METRICS_DIR,
+    DEFAULT_ABLATION_STUDY_DATASET,
+    DEFAULT_ABLATION_STUDY_DIR,
+    ablation_method_options,
+    available_prediction_targets,
+    build_ablation_similarity_matrix,
+    build_knn_prediction_frame,
+    load_ablation_study_dataset,
+    load_method_study_tables,
+    merge_ablation_metadata,
+    similarity_to_distance,
+)
+from alpha_cluster_dashboard.ablation_app import render_ablation_atlas
 from alpha_cluster_dashboard.clustering import (
     cluster_distance_matrix,
     cluster_feature_matrix,
@@ -56,6 +70,16 @@ def cached_catalog(metrics_dir: str):
 @st.cache_data(show_spinner=False)
 def cached_lineage_metadata(lineage_path: str):
     return load_lineage_metadata(lineage_path)
+
+
+@st.cache_data(show_spinner=False)
+def cached_ablation_study_dataset(path: str):
+    return load_ablation_study_dataset(path)
+
+
+@st.cache_data(show_spinner=False)
+def cached_method_study_tables(study_dir: str):
+    return load_method_study_tables(study_dir)
 
 
 def render_overview(catalog: pd.DataFrame) -> None:
@@ -250,16 +274,30 @@ def build_lineage_export_html(
 
 
 def main() -> None:
-    st.set_page_config(page_title="Alpha Clustering Lab", layout="wide")
+    st.set_page_config(page_title="Model Zoo Spectral Atlas", layout="wide")
+    dashboard_mode = st.sidebar.selectbox(
+        "Dashboard",
+        options=["ablation", "generic"],
+        index=0 if DEFAULT_ABLATION_METRICS_DIR.exists() else 1,
+        format_func=lambda value: "Model Zoo Spectral Atlas" if value == "ablation" else "Generic Alpha Lab",
+    )
+    if dashboard_mode == "ablation":
+        render_ablation_atlas()
+        return
+
     st.title("Alpha Clustering Lab")
     st.caption(
         "Compare unsupervised clustering strategies over per-layer alpha spectra while handling models "
         "with different depths and module layouts."
     )
 
-    default_metrics_dir = str(Path("svd_results") / "metrics")
-    metrics_dir = st.sidebar.text_input("Metrics directory", value=default_metrics_dir)
-    lineage_path = st.sidebar.text_input("Lineage metadata CSV", value="data/sampled_metadata.csv")
+    is_ablation_mode = False
+    metrics_dir = st.sidebar.text_input("Metrics directory", value=str(Path("svd_results") / "metrics"))
+    lineage_path = st.sidebar.text_input("Lineage metadata CSV", value=str(Path("data") / "sampled_metadata.csv"))
+    ablation_metadata = pd.DataFrame()
+    method_family_metrics = pd.DataFrame()
+    method_prediction_metrics = pd.DataFrame()
+    ablation_study_dir = ""
 
     if not Path(metrics_dir).exists():
         st.error(f"Metrics directory not found: {metrics_dir}")
@@ -281,13 +319,22 @@ def main() -> None:
         else:
             st.warning(f"Lineage metadata file not found: {lineage_path}")
 
+    ablation_metadata = pd.DataFrame()
+    method_family_metrics = pd.DataFrame()
+    method_prediction_metrics = pd.DataFrame()
+    if is_ablation_mode:
+        ablation_metadata = cached_ablation_study_dataset(ablation_dataset_path)
+        if ablation_metadata.empty:
+            st.warning(f"Ablation study dataset not found or empty: {ablation_dataset_path}")
+        method_family_metrics, method_prediction_metrics = cached_method_study_tables(ablation_study_dir)
+
     render_overview(catalog)
 
     st.sidebar.subheader("Experiment Controls")
     schema_mode = st.sidebar.selectbox(
         "Schema handling",
         options=["common", "canonical"],
-        index=0,
+        index=1 if is_ablation_mode else 0,
         format_func=lambda value: "Common 7-module schema" if value == "common" else "Canonical roles across mixed architectures",
     )
 
@@ -300,11 +347,23 @@ def main() -> None:
         value=(min_layers, max_layers),
     )
     model_query = st.sidebar.text_input("Model name filter", value="")
-    max_models = st.sidebar.slider("Max models in experiment", min_value=2, max_value=min(2500, len(records)), value=300, step=25)
     random_state = st.sidebar.number_input("Random seed", min_value=0, max_value=99999, value=7, step=1)
 
+    records_for_filter = records
+    if is_ablation_mode and not ablation_metadata.empty and "model_id" in ablation_metadata.columns:
+        use_method_study_subset = st.sidebar.checkbox("Use method-study balanced subset", value=True)
+        if use_method_study_subset:
+            study_model_ids = set(ablation_metadata["model_id"].dropna().astype(str))
+            records_for_filter = [record for record in records if record.display_name in study_model_ids]
+            if not records_for_filter:
+                st.warning("The method-study subset did not match any loaded alpha records; falling back to all records.")
+                records_for_filter = records
+
+    default_max_models = min(400 if is_ablation_mode else 300, len(records_for_filter))
+    max_models = st.sidebar.slider("Max models in experiment", min_value=2, max_value=min(2500, len(records_for_filter)), value=default_max_models, step=25)
+
     candidate_records = filter_records(
-        records,
+        records_for_filter,
         schema_mode=schema_mode,
         min_layers=selected_layer_range[0],
         max_layers=selected_layer_range[1],
@@ -336,15 +395,28 @@ def main() -> None:
         st.warning("Select at least one module to build features.")
         return
 
+    representation_options = ["summary", "profile", "dtw_profile"]
+    if is_ablation_mode:
+        representation_options = ["method_similarity", "profile", "summary", "dtw_profile"]
     representation = st.sidebar.selectbox(
         "Representation",
-        options=["summary", "profile", "dtw_profile"],
+        options=representation_options,
         format_func=lambda value: {
             "summary": "Summary statistics over depth",
             "profile": "Resampled alpha profiles",
             "dtw_profile": "Dynamic time warping over normalized profiles",
+            "method_similarity": "Latest ablation method similarity",
         }[value],
     )
+    ablation_similarity_method = "hybrid_rank"
+    if is_ablation_mode:
+        method_options = ablation_method_options()
+        ablation_similarity_method = st.sidebar.selectbox(
+            "Ablation similarity method",
+            options=method_options,
+            index=method_options.index("hybrid_rank") if "hybrid_rank" in method_options else 0,
+            help="Use structural_basics as a leakage control, paper_spearman as the paper-faithful diagnostic, and hybrid/rank methods for prediction neighborhoods.",
+        )
     num_bins = st.sidebar.slider("Normalized depth bins", min_value=8, max_value=48, value=16, step=4)
     summary_stats = st.sidebar.multiselect("Summary statistics", options=SUMMARY_STATS, default=["mean", "std", "median", "slope", "start", "end"])
     include_presence_features = st.sidebar.checkbox("Add module presence indicators", value=True)
@@ -355,12 +427,12 @@ def main() -> None:
     zscore_within_trace = st.sidebar.checkbox("Z-score each module trace", value=False)
     dtw_missing_penalty = st.sidebar.slider("DTW missing-module penalty", min_value=0.0, max_value=8.0, value=2.5, step=0.25)
 
-    if representation == "dtw_profile" and len(candidate_records) > 400:
+    if representation in {"dtw_profile", "method_similarity"} and len(candidate_records) > 400:
         st.warning(
-            "DTW scales quadratically with the number of models. Reduce `Max models` below about 400 for quicker experiments."
+            "Distance/similarity methods scale quadratically with the number of models. Reduce `Max models` below about 400 for quicker experiments."
         )
 
-    if representation == "dtw_profile":
+    if representation in {"dtw_profile", "method_similarity"}:
         algorithm = st.sidebar.selectbox(
             "Clustering algorithm",
             options=["agglomerative", "dbscan"],
@@ -386,12 +458,13 @@ def main() -> None:
     dbscan_eps = st.sidebar.slider("DBSCAN eps", min_value=0.05, max_value=6.0, value=1.25, step=0.05)
     dbscan_min_samples = st.sidebar.slider("DBSCAN min_samples", min_value=2, max_value=20, value=4)
 
+    prepared_representation = "profile" if representation == "method_similarity" else representation
     try:
         prepared = build_prepared_dataset(
             records=candidate_records,
             schema_mode=schema_mode,
             selected_modules=selected_modules,
-            representation=representation,
+            representation=prepared_representation,
             num_bins=num_bins,
             summary_stats=summary_stats,
             include_presence_features=include_presence_features,
@@ -404,7 +477,25 @@ def main() -> None:
         st.warning(str(exc))
         return
 
-    if representation == "dtw_profile":
+    ablation_similarity_matrix = None
+    clustering_distance_matrix = None
+    if representation == "method_similarity":
+        method_metadata = merge_ablation_metadata(prepared.metadata, ablation_metadata)
+        with st.spinner(f"Building {ablation_similarity_method} similarity matrix"):
+            ablation_similarity_matrix = build_ablation_similarity_matrix(
+                candidate_records,
+                ablation_similarity_method,
+                metadata=method_metadata,
+            )
+        clustering_distance_matrix = similarity_to_distance(ablation_similarity_matrix)
+        result = cluster_distance_matrix(
+            clustering_distance_matrix,
+            algorithm=algorithm,
+            n_clusters=n_clusters,
+            dbscan_eps=dbscan_eps,
+            dbscan_min_samples=dbscan_min_samples,
+        )
+    elif representation == "dtw_profile":
         result = cluster_distance_matrix(
             prepared.distance_matrix,
             algorithm=algorithm,
@@ -426,6 +517,8 @@ def main() -> None:
 
     summary = cluster_summary_table(prepared.metadata, result.labels, prepared.profiles)
     enriched_metadata = merge_lineage_metadata(prepared.metadata, lineage_metadata)
+    if is_ablation_mode:
+        enriched_metadata = merge_ablation_metadata(enriched_metadata, ablation_metadata)
     lineage_metrics = build_lineage_quality_metrics(
         enriched_metadata,
         result.labels,
@@ -445,8 +538,18 @@ def main() -> None:
     metrics[5].metric("Dunn index", "n/a" if dunn_index is None else f"{dunn_index:.3f}")
     if separation_ratio is not None:
         st.caption(f"Between/within distance ratio: {separation_ratio:.3f}")
+    if is_ablation_mode:
+        st.caption(
+            f"Ablation mode: clustering uses `{ablation_similarity_method}` when the latest-method representation is selected. "
+            "`structural_basics` is a leakage control, not a spectral method."
+        )
 
-    projection_tab, lineage_tab = st.tabs(["Cluster Projection", "Base-Model View"])
+    if is_ablation_mode:
+        projection_tab, prediction_tab, method_tab, lineage_tab = st.tabs(
+            ["Cluster Projection", "Prediction Neighborhoods", "Method Study", "Base-Model View"]
+        )
+    else:
+        projection_tab, lineage_tab = st.tabs(["Cluster Projection", "Base-Model View"])
 
     scatter_frame = enriched_metadata.copy()
     scatter_frame["cluster"] = result.labels.astype(str)
@@ -456,20 +559,27 @@ def main() -> None:
     lineage_cluster_summary = build_lineage_cluster_summary(scatter_frame, result.labels)
 
     with projection_tab:
+        hover_columns = [
+            "num_layers",
+            "raw_module_count",
+            "overall_alpha",
+            "base_model",
+            "source_model",
+            "base_model_relation",
+            "coarse_family",
+            "Architecture",
+            "#Params (B)",
+            "Average \u2b06\ufe0f",
+            "MMLU-PRO",
+            "MATH Lvl 5",
+        ]
         scatter = px.scatter(
             scatter_frame,
             x="embedding_x",
             y="embedding_y",
             color="cluster",
             hover_name="display_name",
-            hover_data=[
-                "num_layers",
-                "raw_module_count",
-                "overall_alpha",
-                "base_model",
-                "source_model",
-                "base_model_relation",
-            ],
+            hover_data=[column for column in hover_columns if column in scatter_frame.columns],
             title=f"{result.embedding_name} view of clustered models",
         )
         st.plotly_chart(scatter, width="stretch")
@@ -499,17 +609,22 @@ def main() -> None:
 
         with right_column:
             st.markdown("**Filtered Models**")
+            filtered_columns = [
+                "display_name",
+                "coarse_family",
+                "Architecture",
+                "#Params (B)",
+                "Average \u2b06\ufe0f",
+                "MMLU-PRO",
+                "MATH Lvl 5",
+                "base_model",
+                "base_model_relation",
+                "num_layers",
+                "raw_module_count",
+                "path",
+            ]
             st.dataframe(
-                scatter_frame[
-                    [
-                        "display_name",
-                        "base_model",
-                        "base_model_relation",
-                        "num_layers",
-                        "raw_module_count",
-                        "path",
-                    ]
-                ],
+                scatter_frame[[column for column in filtered_columns if column in scatter_frame.columns]],
                 width="stretch",
                 height=320,
                 hide_index=True,
@@ -541,6 +656,84 @@ def main() -> None:
             title="Per-model module coverage after preprocessing",
         )
         st.plotly_chart(heatmap, width="stretch")
+
+    if is_ablation_mode:
+        with prediction_tab:
+            st.markdown("**Prediction Neighborhoods**")
+            st.caption(
+                "This is leave-one-out kNN over the selected ablation similarity method. It is an association diagnostic, not a causal performance model."
+            )
+            targets = available_prediction_targets(scatter_frame)
+            if not targets:
+                st.info("No benchmark targets are available for the current ablation selection.")
+            else:
+                prediction_controls = st.columns([0.65, 0.35])
+                prediction_target = prediction_controls[0].selectbox("Prediction target", options=targets)
+                prediction_k = prediction_controls[1].slider("Neighbors", min_value=1, max_value=10, value=3)
+
+                if ablation_similarity_matrix is None:
+                    prediction_metadata = merge_ablation_metadata(prepared.metadata, ablation_metadata)
+                    with st.spinner(f"Building {ablation_similarity_method} prediction neighborhoods"):
+                        prediction_similarity = build_ablation_similarity_matrix(
+                            candidate_records,
+                            ablation_similarity_method,
+                            metadata=prediction_metadata,
+                        )
+                else:
+                    prediction_similarity = ablation_similarity_matrix
+
+                prediction_frame = build_knn_prediction_frame(
+                    scatter_frame,
+                    prediction_similarity,
+                    target=prediction_target,
+                    k=prediction_k,
+                )
+                if prediction_frame.empty:
+                    st.info("No finite prediction pairs are available for this target and selection.")
+                else:
+                    mae = float(prediction_frame["absolute_error"].mean())
+                    spearman = prediction_frame["actual"].corr(prediction_frame["prediction"], method="spearman")
+                    pred_cards = st.columns(3)
+                    pred_cards[0].metric("Prediction rows", f"{len(prediction_frame):,}")
+                    pred_cards[1].metric("MAE", f"{mae:.3f}")
+                    pred_cards[2].metric("Spearman", "n/a" if pd.isna(spearman) else f"{spearman:.3f}")
+
+                    pred_plot = px.scatter(
+                        prediction_frame,
+                        x="actual",
+                        y="prediction",
+                        hover_name="display_name",
+                        hover_data=["absolute_error", "nearest_neighbors"],
+                        title=f"{prediction_target}: actual vs {prediction_k}-NN prediction via {ablation_similarity_method}",
+                    )
+                    lower = float(np.nanmin([prediction_frame["actual"].min(), prediction_frame["prediction"].min()]))
+                    upper = float(np.nanmax([prediction_frame["actual"].max(), prediction_frame["prediction"].max()]))
+                    pred_plot.add_shape(type="line", x0=lower, y0=lower, x1=upper, y1=upper, line={"dash": "dash"})
+                    st.plotly_chart(pred_plot, width="stretch")
+
+                    st.markdown("**Largest Absolute Errors**")
+                    st.dataframe(
+                        prediction_frame.sort_values("absolute_error", ascending=False).head(30),
+                        width="stretch",
+                        hide_index=True,
+                    )
+
+        with method_tab:
+            st.markdown("**Latest Ablation Method Study**")
+            st.caption(
+                "Structural metadata dominates coarse-family recovery; rank-shape spectral neighborhoods are the useful direction for benchmark prediction."
+            )
+            if not method_family_metrics.empty:
+                st.markdown("**Family Retrieval / Leakage Control**")
+                st.dataframe(method_family_metrics, width="stretch", hide_index=True)
+            if not method_prediction_metrics.empty:
+                st.markdown("**kNN Prediction Metrics**")
+                st.dataframe(method_prediction_metrics, width="stretch", hide_index=True)
+
+            report_path = Path(ablation_study_dir) / "method_decision_report.md"
+            if report_path.exists():
+                with st.expander("Read generated method-study report"):
+                    st.markdown(report_path.read_text(encoding="utf-8"))
 
     with lineage_tab:
         if not enriched_metadata["base_model_known"].any():

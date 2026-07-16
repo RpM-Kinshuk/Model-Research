@@ -1,0 +1,5 @@
+lineage_eval_group,selected_rows,success_rows,failed_rows,stats_artifact_rows,metrics_artifact_rows,success_rate,stats_artifact_rate
+unrelated_negative_pair,4462,3065,983,3479,3479,0.6869116987897804,0.7796952039444195
+same_base_finetune,220,60,55,164,164,0.2727272727272727,0.7454545454545455
+known_merge_family,30,0,12,18,18,0.0,0.6
+adapter_versus_merged_base_pair,1,0,1,0,0,0.0,0.0
