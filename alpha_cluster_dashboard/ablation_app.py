@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import colorsys
-from dataclasses import asdict
 import hashlib
 import html
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -13,21 +13,15 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from alpha_cluster_dashboard.ablation import (
-    DEFAULT_ABLATION_STUDY_DIR,
-    DEFAULT_ABLATION_METRICS_DIR,
-    load_method_study_tables,
-)
 from alpha_cluster_dashboard.dashboard_cache import (
-    DEFAULT_ABLATION_METADATA,
-    DEFAULT_CACHE_DIR,
     DashboardCache,
-    DashboardCacheConfig,
-    cache_is_valid,
     infer_prediction_targets,
-    load_or_build_dashboard_cache,
     recommended_cluster_count,
-    source_fingerprint,
+)
+from alpha_cluster_dashboard.study_outputs import (
+    REQUIRED_STUDY_FILES,
+    StudyOutputs,
+    load_study_outputs,
 )
 
 
@@ -167,14 +161,14 @@ def _prediction_hover_template() -> str:
 
 
 def _render_dashboard_chrome() -> None:
-    light = _dashboard_theme_tokens(dark=False)
+    base = _dashboard_theme_tokens()
     dark = _dashboard_theme_tokens(dark=True)
     st.markdown(
         f"""
         <style>
         .stApp {{
-            background: {light["app_bg"]};
-            color: {light["text"]};
+            background: {base["app_bg"]};
+            color: {base["text"]};
         }}
         .block-container {{
             padding-top: 1.0rem;
@@ -191,29 +185,39 @@ def _render_dashboard_chrome() -> None:
             letter-spacing: 0;
         }}
         [data-testid="stMetric"] {{
-            border: 1px solid {light["border"]};
-            border-radius: {light["radius"]};
+            border: 1px solid {base["border"]};
+            border-radius: {base["radius"]};
             padding: 0.58rem 0.70rem;
-            background: {light["surface_bg"]};
-            box-shadow: {light["shadow"]};
+            background: {base["surface_bg"]};
+            box-shadow: {base["shadow"]};
         }}
         [data-testid="stMetricLabel"] {{
             font-size: 0.74rem;
-            color: {light["muted"]};
+            color: {base["muted"]};
             font-weight: 560;
         }}
         [data-testid="stMetricValue"] {{
             font-size: 1.13rem;
             font-weight: 650;
-            color: {light["text"]};
+            color: {base["text"]};
         }}
         [data-testid="stMetricDelta"] {{
             font-size: 0.72rem;
-            color: {light["muted"]};
+            line-height: 1.18;
+            color: {base["muted"]};
+            align-items: flex-start;
+        }}
+        [data-testid="stMetricDelta"] p {{
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+        }}
+        [data-testid="stMetricDelta"] svg {{
+            display: none;
         }}
         [data-testid="stSidebar"] {{
-            background: {light["surface_bg"]};
-            border-right: 1px solid {light["border"]};
+            background: {base["surface_bg"]};
+            border-right: 1px solid {base["border"]};
         }}
         [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{
             gap: 0.48rem;
@@ -222,30 +226,46 @@ def _render_dashboard_chrome() -> None:
             font-size: 0.86rem;
             font-weight: 680;
             margin-top: 0.65rem;
-            color: {light["text"]};
+            color: {base["text"]};
         }}
         div[role="radiogroup"] {{
             gap: 0.35rem;
         }}
         div[role="radiogroup"] label {{
-            border: 1px solid {light["border"]};
-            border-radius: {light["radius"]};
+            border: 1px solid {base["border"]};
+            border-radius: {base["radius"]};
             padding: 0.25rem 0.50rem;
-            background: {light["surface_bg"]};
+            background: {base["surface_bg"]};
         }}
         div[role="radiogroup"] label:hover {{
-            border-color: {light["accent"]};
-            background: {light["accent_soft"]};
+            border-color: {base["accent"]};
+            background: {base["accent_soft"]};
         }}
         .stDataFrame, [data-testid="stTable"] {{
-            border-radius: {light["radius"]};
+            border-radius: {base["radius"]};
         }}
         .stPlotlyChart {{
-            border: 1px solid {light["border"]};
-            border-radius: {light["radius"]};
-            background: {light["surface_bg"]};
-            box-shadow: {light["shadow"]};
+            border: 1px solid {base["border"]};
+            border-radius: {base["radius"]};
+            background: {base["surface_bg"]};
+            box-shadow: {base["shadow"]};
             padding: 0.2rem;
+        }}
+        @media (max-width: 700px) {{
+            [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] [data-testid="stMetric"]) {{
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 0.52rem;
+            }}
+            [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] [data-testid="stMetric"])
+                > [data-testid="stColumn"] {{
+                width: auto !important;
+                min-width: 0 !important;
+                flex: none !important;
+            }}
+            [data-testid="stMetric"] {{
+                min-height: 4.55rem;
+            }}
         }}
         @media (prefers-color-scheme: dark) {{
             .stApp {{
@@ -361,6 +381,261 @@ def _panel_options() -> list[str]:
     return ["Atlas", "Prediction", "Lineage", "Profiles", "Evidence", "Data"]
 
 
+def _frozen_run_state_token(run_path: str | Path) -> str:
+    root = Path(run_path).expanduser().resolve()
+    state: list[tuple[str, int | None, int | None, int | None]] = []
+    for name in REQUIRED_STUDY_FILES:
+        try:
+            metadata = (root / name).stat()
+            state.append(
+                (name, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns)
+            )
+        except OSError:
+            state.append((name, None, None, None))
+    try:
+        artifact_manifest_digest = hashlib.sha256(
+            (root / "artifact_manifest.json").read_bytes()
+        ).hexdigest()
+    except OSError:
+        artifact_manifest_digest = "missing"
+    payload = json.dumps(
+        {
+            "run_path": str(root),
+            "files": state,
+            "artifact_manifest_sha256": artifact_manifest_digest,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+@st.cache_data(show_spinner=False, persist="disk")
+def _cached_study_outputs(run_path: str, run_state_token: str) -> StudyOutputs:
+    del run_state_token
+    return load_study_outputs(run_path)
+
+
+def _development_oof_predictions(outputs: StudyOutputs) -> dict[str, pd.DataFrame]:
+    rows = outputs.performance_predictions.copy()
+    if rows.empty or "model_id" not in rows.columns:
+        return {}
+    if "feature_block" in rows.columns:
+        rows = rows.loc[rows["feature_block"].astype(str).eq("M+S+H")].copy()
+    if "evaluation_scope" in rows.columns:
+        rows = rows.loc[
+            rows["evaluation_scope"].astype("string").str.casefold().eq("development")
+        ].copy()
+    elif "external_slice" in rows.columns:
+        external_slice = rows["external_slice"].astype("string").fillna("").str.strip()
+        rows = rows.loc[external_slice.isin(("", "development"))].copy()
+    if rows.empty:
+        return {}
+    if "target" not in rows.columns:
+        rows["target"] = str(outputs.performance_summary.get("target") or "modern_average")
+
+    predictions: dict[str, pd.DataFrame] = {}
+    for target, group in rows.groupby("target", sort=False, dropna=True):
+        selected = group.drop_duplicates("model_id", keep="first").copy()
+        selected["display_name"] = selected["model_id"].astype(str)
+        selected["actual"] = pd.to_numeric(selected.get("actual"), errors="coerce")
+        selected["prediction"] = pd.to_numeric(selected.get("prediction"), errors="coerce")
+        selected["absolute_error"] = (selected["actual"] - selected["prediction"]).abs()
+        selected["nearest_neighbors"] = ""
+        predictions[str(target)] = selected.loc[
+            :, ["display_name", "actual", "prediction", "absolute_error", "nearest_neighbors"]
+        ].reset_index(drop=True)
+    return predictions
+
+
+def _frozen_cluster_summary(metadata: pd.DataFrame) -> pd.DataFrame:
+    if metadata.empty or "cluster" not in metadata.columns:
+        return pd.DataFrame(
+            columns=["cluster", "size", "dominant_family", "dominant_family_share", "mean_layers"]
+        )
+    metadata = metadata.copy()
+    clusters = pd.to_numeric(metadata["cluster"], errors="coerce")
+    metadata = metadata.loc[clusters.notna() & clusters.ge(0)].copy()
+    metadata["cluster"] = clusters.loc[metadata.index].astype(int)
+    if metadata.empty:
+        return pd.DataFrame(
+            columns=["cluster", "size", "dominant_family", "dominant_family_share", "mean_layers"]
+        )
+    layer_column = next(
+        (column for column in ("num_layers", "M__layer_count") if column in metadata.columns),
+        None,
+    )
+    family_column = next(
+        (column for column in ("coarse_family", "predicted_family", "audited_base_family") if column in metadata.columns),
+        None,
+    )
+    rows: list[dict[str, object]] = []
+    for cluster, group in metadata.groupby("cluster", sort=True):
+        families = (
+            group[family_column].fillna("unknown").astype(str).value_counts()
+            if family_column is not None
+            else pd.Series({"unknown": len(group)})
+        )
+        rows.append(
+            {
+                "cluster": int(cluster),
+                "size": int(len(group)),
+                "dominant_family": str(families.index[0]),
+                "dominant_family_share": float(families.iloc[0] / len(group)),
+                "mean_layers": (
+                    float(pd.to_numeric(group[layer_column], errors="coerce").mean())
+                    if layer_column is not None
+                    else np.nan
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _frozen_cluster_profiles(metadata: pd.DataFrame) -> pd.DataFrame:
+    if metadata.empty or "cluster" not in metadata.columns:
+        return pd.DataFrame(columns=["cluster", "role", "depth", "log_alpha", "role_name"])
+    metadata = metadata.copy()
+    clusters = pd.to_numeric(metadata["cluster"], errors="coerce")
+    metadata = metadata.loc[clusters.notna() & clusters.ge(0)].copy()
+    metadata["cluster"] = clusters.loc[metadata.index].astype(int)
+    if metadata.empty:
+        return pd.DataFrame(columns=["cluster", "role", "depth", "log_alpha", "role_name"])
+    profile_columns: list[tuple[str, str, str]] = []
+    for column in metadata.columns:
+        parts = str(column).split("__")
+        if len(parts) == 4 and parts[0] == "H" and parts[2:] == ["alpha", "median"]:
+            profile_columns.append((str(column), parts[1], "stored DKS alpha"))
+    if not profile_columns:
+        return pd.DataFrame(columns=["cluster", "role", "depth", "log_alpha", "role_name"])
+
+    role_names = list(dict.fromkeys(role_name for _, role_name, _ in profile_columns))
+    role_depth = {
+        role_name: index / max(len(role_names) - 1, 1)
+        for index, role_name in enumerate(role_names)
+    }
+    rows: list[dict[str, object]] = []
+    for cluster, group in metadata.groupby("cluster", sort=True):
+        for column, role_name, profile_name in profile_columns:
+            alpha = pd.to_numeric(group[column], errors="coerce")
+            valid_alpha = alpha.loc[alpha.gt(-1.0) & alpha.notna()]
+            log_alpha = float(np.log1p(valid_alpha).mean()) if not valid_alpha.empty else np.nan
+            rows.append(
+                {
+                    "cluster": int(cluster),
+                    "role": profile_name,
+                    "depth": float(role_depth[role_name]),
+                    "log_alpha": log_alpha,
+                    "role_name": role_name,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _dashboard_cache_from_study(outputs: StudyOutputs) -> DashboardCache:
+    """Adapt validated frozen tables to the existing 2D dashboard helpers."""
+
+    metadata = outputs.atlas.copy().reset_index(drop=True)
+    if "model_id" not in metadata.columns:
+        metadata["model_id"] = metadata.get("display_name", pd.Series(index=metadata.index, dtype=str))
+    metadata["model_id"] = metadata["model_id"].astype(str)
+    metadata["display_name"] = metadata.get("display_name", metadata["model_id"]).fillna(metadata["model_id"]).astype(str)
+    if "cluster" not in metadata.columns:
+        metadata["cluster"] = pd.Series(pd.NA, index=metadata.index, dtype="Int64")
+    else:
+        metadata["cluster"] = pd.to_numeric(
+            metadata["cluster"], errors="coerce"
+        ).astype("Int64")
+
+    predictions = _development_oof_predictions(outputs)
+    for target, table in predictions.items():
+        indexed = table.set_index("display_name")
+        metadata[target] = metadata["display_name"].map(indexed["actual"])
+        metadata[f"{target} prediction"] = metadata["display_name"].map(indexed["prediction"])
+        metadata[f"{target} absolute_error"] = metadata["display_name"].map(indexed["absolute_error"])
+
+    if "predicted_family" in metadata.columns:
+        metadata["Predicted family"] = metadata["predicted_family"].fillna("unavailable").astype(str)
+    if "correct" in metadata.columns:
+        correctness = metadata["correct"].astype("string").str.casefold()
+        metadata["Lineage correctness"] = np.select(
+            [
+                correctness.eq("true").fillna(False).to_numpy(dtype=bool),
+                correctness.eq("false").fillna(False).to_numpy(dtype=bool),
+            ],
+            ["correct", "incorrect"],
+            default="unavailable",
+        )
+    if "lineage_endpoint" in metadata.columns:
+        metadata["Lineage endpoint"] = (
+            metadata["lineage_endpoint"]
+            .astype("string")
+            .str.replace("_", " ", regex=False)
+            .fillna("unavailable")
+        )
+
+    return DashboardCache(
+        cache_dir=outputs.run_dir,
+        metadata=metadata,
+        features=np.empty((len(metadata), 0), dtype=float),
+        feature_names=[],
+        predictions=predictions,
+        cluster_profiles=_frozen_cluster_profiles(metadata),
+        cluster_summary=_frozen_cluster_summary(metadata),
+        manifest={"provenance": dict(outputs.provenance), "summary": dict(outputs.summary)},
+    )
+
+
+def _study_summary_cards(outputs: StudyOutputs) -> list[dict[str, str]]:
+    lineage = outputs.lineage_summary
+    performance = outputs.performance_summary
+    family_count = lineage.get("n_families")
+    evidence_status = (
+        "inferential" if lineage.get("inferential") is True else "descriptive"
+    )
+    lineage_scope = (
+        f"{int(family_count)} families / {evidence_status}"
+        if family_count is not None
+        else evidence_status
+    )
+    external_delta = performance.get("external_htsr_delta_mae")
+    external_card = {"label": "External dMAE", "value": "Unavailable"}
+    if outputs.external_status in {"available", "descriptive", "descriptive_reuse"} and external_delta is not None:
+        external_card["value"] = _format_number(external_delta)
+        external_models = performance.get("external_n_models")
+        external_groups = performance.get("external_n_components")
+        if external_models is not None and external_groups is not None:
+            prefix = "reused; " if outputs.external_status == "descriptive_reuse" else ""
+            external_card["delta"] = f"{prefix}{int(external_models):,} / {int(external_groups):,}"
+    observed_lift = lineage.get("observed_htsr_lift")
+    observed_delta = "descriptive"
+    if observed_lift is not None and pd.notna(observed_lift):
+        observed_delta = f"HTSR lift {100.0 * float(observed_lift):+.1f} pp"
+    decision_delta = (
+        "claim passed" if performance.get("primary_passed") is True else "claim failed"
+    )
+    return [
+        {"label": "Manifest models", "value": f"{len(outputs.manifest):,}"},
+        {
+            "label": "Root top-1",
+            "value": _format_percent(lineage.get("root_macro_top1")),
+            "delta": lineage_scope,
+        },
+        {
+            "label": "Known-family top-1",
+            "value": _format_percent(lineage.get("observed_family_top1")),
+            "delta": observed_delta,
+        },
+        {"label": "Grouped MAE", "value": _format_number(performance.get("group_weighted_mae"))},
+        {
+            "label": "HTSR dMAE",
+            "value": _format_number(performance.get("htsr_delta_mae")),
+            "delta": decision_delta,
+        },
+        external_card,
+    ]
+
+
 def _manifest_model_count(cache_dir: str | Path) -> int | None:
     manifest_path = Path(cache_dir) / "manifest.json"
     try:
@@ -424,6 +699,11 @@ def _edge_color_for_key(value: object) -> str:
 def _cluster_center_models(frame: pd.DataFrame, target: str | None = None) -> dict[int, str]:
     if frame.empty or "cluster" not in frame.columns:
         return {}
+    clusters = pd.to_numeric(frame["cluster"], errors="coerce")
+    frame = frame.loc[clusters.notna() & clusters.ge(0)].copy()
+    frame["cluster"] = clusters.loc[frame.index].astype(int)
+    if frame.empty:
+        return {}
     prediction_column = f"{target} prediction" if target else ""
     error_column = f"{target} absolute_error" if target else ""
     numeric_candidates = [
@@ -432,7 +712,7 @@ def _cluster_center_models(frame: pd.DataFrame, target: str | None = None) -> di
         if column and column in frame.columns
     ]
     result: dict[int, str] = {}
-    for cluster, group in frame.groupby(pd.to_numeric(frame["cluster"], errors="coerce").fillna(-1).astype(int), sort=True):
+    for cluster, group in frame.groupby("cluster", sort=True):
         if group.empty:
             continue
         if numeric_candidates:
@@ -462,12 +742,14 @@ def _with_display_columns(frame: pd.DataFrame, target: str | None = None) -> pd.
     if "cluster" in result.columns and "Predicted cluster" not in result.columns:
         clusters = pd.to_numeric(result["cluster"], errors="coerce")
         result["Predicted cluster"] = [
-            f"C{int(value):02d}" if np.isfinite(value) else "unknown"
+            f"C{int(value):02d}" if pd.notna(value) and value >= 0 else "unassigned"
             for value in clusters
         ]
         center_models = _cluster_center_models(result, target)
         result["Cluster center model"] = [
-            _display_model_name(center_models.get(int(value), "unknown")) if np.isfinite(value) else "unknown"
+            _display_model_name(center_models.get(int(value), "unknown"))
+            if pd.notna(value) and value >= 0
+            else "unassigned"
             for value in clusters
         ]
     prediction_column = f"{target} prediction" if target else ""
@@ -487,7 +769,13 @@ def _color_options(frame: pd.DataFrame, target: str | None) -> list[str]:
         options.append("Predicted cluster")
     if "cluster" in frame.columns:
         options.append("cluster")
-    for column in ("coarse_family", "Architecture", "Type", "Weight type"):
+    for column in (
+        "coarse_family",
+        "Lineage endpoint",
+        "Architecture",
+        "Type",
+        "Weight type",
+    ):
         if column in frame.columns:
             options.append(column)
     if target and target in frame.columns:
@@ -499,11 +787,25 @@ def _color_options(frame: pd.DataFrame, target: str | None) -> list[str]:
     return options
 
 
+def _lineage_color_options(frame: pd.DataFrame) -> list[str]:
+    return [
+        column
+        for column in (
+            "Predicted cluster",
+            "Predicted family",
+            "Lineage endpoint",
+            "Lineage correctness",
+        )
+        if column in frame.columns
+    ]
+
+
 def _dynamic_hover_columns(frame: pd.DataFrame, target: str | None) -> list[str]:
     preferred = [
         "Predicted cluster",
         "Cluster center model",
         "coarse_family",
+        "Lineage endpoint",
         "Architecture",
         "Type",
         "Weight type",
@@ -545,7 +847,7 @@ def _filter_frame(
     if architectures and "Architecture" in result.columns:
         result = result[result["Architecture"].fillna("unknown").astype(str).isin(architectures)]
     if clusters:
-        result = result[result["cluster"].astype(int).isin(clusters)]
+        result = result[pd.to_numeric(result["cluster"], errors="coerce").isin(clusters)]
     query = search_text.strip().lower()
     if query:
         searchable_columns = [column for column in ("display_name", "Model", "id") if column in result.columns]
@@ -555,13 +857,6 @@ def _filter_frame(
                 mask = mask | result[column].fillna("").astype(str).str.lower().str.contains(query, regex=False)
             result = result[mask]
     return result
-
-
-def _cap_render_frame(frame: pd.DataFrame, limit: int, random_state: int = 7) -> pd.DataFrame:
-    if limit <= 0 or len(frame) <= limit:
-        return frame
-    sort_column = "display_name" if "display_name" in frame.columns else frame.columns[0]
-    return frame.sample(n=int(limit), random_state=random_state).sort_values(sort_column)
 
 
 def _render_point_bounds(total_points: int, edge_density: str) -> tuple[int, int]:
@@ -783,7 +1078,11 @@ def _cluster_galaxy_layout(frame: pd.DataFrame, target: str | None = None) -> pd
     layout = frame.copy()
     if "cluster" not in layout.columns:
         layout["cluster"] = 0
-    layout["cluster"] = pd.to_numeric(layout["cluster"], errors="coerce").fillna(-1).astype(int)
+    clusters = pd.to_numeric(layout["cluster"], errors="coerce")
+    layout = layout.loc[clusters.notna() & clusters.ge(0)].copy()
+    layout["cluster"] = clusters.loc[layout.index].astype(int)
+    if layout.empty:
+        return layout
     if "Cluster center model" not in layout.columns:
         center_models = _cluster_center_models(layout, target)
         layout["Cluster center model"] = layout["cluster"].map(lambda value: _display_model_name(center_models.get(int(value), "unknown")))
@@ -1336,8 +1635,14 @@ def _render_metric_cards(cache: DashboardCache, frame: pd.DataFrame, target: str
         column.metric(card["label"], card["value"], card.get("delta"), delta_color="off")
 
 
-def _plotly_chart(fig, *, scroll_zoom: bool = False) -> None:
-    st.plotly_chart(fig, width="stretch", config=_plot_config(scroll_zoom=scroll_zoom))
+def _plotly_chart(fig, *, key: str, scroll_zoom: bool = False) -> None:
+    fig.update_layout(uirevision=key)
+    st.plotly_chart(
+        fig,
+        key=key,
+        width="stretch",
+        config=_plot_config(scroll_zoom=scroll_zoom),
+    )
 
 
 def _render_color_legend(frame: pd.DataFrame, color_by: str, max_items: int | None = None) -> None:
@@ -1347,16 +1652,27 @@ def _render_color_legend(frame: pd.DataFrame, color_by: str, max_items: int | No
     counts = frame[color_by].fillna("unknown").astype(str).value_counts()
     ordered = [value for value in counts.index.tolist() if value in color_map]
     if max_items is None:
-        max_items = max(1, min(len(ordered), int(round(np.sqrt(max(len(frame), 1)) * 2.0))))
+        preview_size = int(np.ceil(np.log2(max(len(frame), 2))))
+        max_items = max(1, min(len(ordered), preview_size))
     visible = ordered[:max_items]
     items = []
     for value in visible:
         count = int(counts[value])
+        display_value = value
+        if color_by == "Predicted cluster" and "Cluster center model" in frame.columns:
+            cluster_values = frame[color_by].fillna("unknown").astype(str)
+            representatives = (
+                frame.loc[cluster_values.eq(value), "Cluster center model"]
+                .dropna()
+                .astype(str)
+            )
+            if not representatives.empty:
+                display_value = representatives.iloc[0]
         items.append(
             "<span style='display:inline-flex;align-items:center;gap:5px;min-width:0;'>"
             f"<span style='width:8px;height:8px;border-radius:999px;background:{color_map[value]};"
             "display:inline-block;border:1px solid rgba(15,23,42,0.28);'></span>"
-            f"<span style='white-space:nowrap;'>{html.escape(value)} ({count:,})</span>"
+            f"<span style='white-space:nowrap;'>{html.escape(display_value)} ({count:,})</span>"
             "</span>"
         )
     if len(ordered) > max_items:
@@ -1476,127 +1792,6 @@ def _plot_prediction_lineage(
     )
 
 
-def _render_prediction_tab(cache: DashboardCache, target: str) -> None:
-    predictions = cache.predictions.get(target, pd.DataFrame())
-    if predictions.empty:
-        st.info("No prediction-neighborhood table is available for this target.")
-        return
-    labeled = _labeled_prediction_rows(predictions)
-    metric_cards = _prediction_metric_cards(predictions)
-    cols = st.columns(len(metric_cards))
-    for column, card in zip(cols, metric_cards, strict=False):
-        column.metric(card["label"], card["value"])
-    st.caption(
-        f"Residual metrics use models with known {target} labels; unlabeled models still receive cached neighbor predictions."
-    )
-
-    if labeled.empty:
-        st.info("No finite labels are available for residual plots on this target.")
-        st.dataframe(predictions, width="stretch", height=SECONDARY_PLOT_HEIGHT, hide_index=True)
-        return
-
-    labeled = labeled.copy()
-    labeled["hover_model"] = labeled["display_name"].map(lambda value: _display_model_name(value, limit=44))
-    labeled["neighbor_preview"] = labeled["nearest_neighbors"].map(_preview_neighbors)
-    dark = _is_dark_theme()
-    scatter = px.scatter(
-        labeled,
-        x="actual",
-        y="prediction",
-        color="absolute_error",
-        custom_data=["hover_model", "actual", "prediction", "absolute_error", "neighbor_preview"],
-        color_continuous_scale=_prediction_error_color_scale(dark=dark),
-        title=f"{target}: actual vs cached kNN prediction",
-        render_mode="webgl",
-    )
-    lower = float(np.nanmin([labeled["actual"].min(), labeled["prediction"].min()]))
-    upper = float(np.nanmax([labeled["actual"].max(), labeled["prediction"].max()]))
-    scatter.add_shape(
-        type="line",
-        x0=lower,
-        y0=lower,
-        x1=upper,
-        y1=upper,
-        line={"dash": "dash", "color": "rgba(226,232,240,0.72)" if dark else "rgba(15,23,42,0.48)", "width": 1.4},
-    )
-    scatter.update_traces(
-        hovertemplate=_prediction_hover_template(),
-        marker={
-            "size": 6,
-            "opacity": 0.84,
-            "line": {"width": 0.45, "color": "rgba(15,23,42,0.42)" if dark else "rgba(255,255,255,0.58)"},
-        },
-    )
-    scatter.update_layout(height=PLOT_HEIGHT)
-    _apply_analytics_style(scatter, dark=dark)
-    _plotly_chart(scatter)
-
-    hist = px.histogram(labeled, x="absolute_error", nbins=40, title="Prediction residual distribution")
-    hist.update_layout(height=SECONDARY_PLOT_HEIGHT)
-    _apply_analytics_style(hist)
-    _plotly_chart(hist)
-
-    st.dataframe(
-        labeled.sort_values("absolute_error", ascending=False).head(40),
-        width="stretch",
-        height=SECONDARY_PLOT_HEIGHT,
-        hide_index=True,
-    )
-
-
-def _render_lineage_tab(
-    cache: DashboardCache,
-    target: str | None,
-    frame: pd.DataFrame,
-    color_by: str,
-    size_by: str,
-    view_mode: str,
-    rendered_points: int,
-    edge_density: str,
-    gesture_zoom: bool,
-    atlas_zoom: float,
-) -> None:
-    if target is None:
-        st.info("No benchmark target is available.")
-        return
-
-    lineage = _prediction_lineage_frame(cache, target, frame)
-    if lineage.empty:
-        st.info("No prediction lineage rows are available for this target and filter.")
-        return
-
-    plot_frame = _cap_render_frame(lineage, rendered_points)
-    metrics = _lineage_quality_metrics(lineage)
-    metric_cols = st.columns(5)
-    metric_cols[0].metric("Predicted", f"{int(metrics['predicted_count']):,}")
-    metric_cols[1].metric("Known labels", f"{int(metrics['labeled_count']):,}")
-    metric_cols[2].metric("Same-family links", _format_percent(metrics["same_family_link_rate"]))
-    metric_cols[3].metric("MAE", _format_number(metrics["mae"]))
-    metric_cols[4].metric("Spearman", _format_number(metrics["spearman"]))
-    st.caption(
-        f"2D cluster galaxy over {len(plot_frame):,} of {int(metrics['predicted_count']):,} filtered predicted models."
-    )
-    _plotly_chart(
-        _plot_prediction_lineage(plot_frame, color_by, size_by, view_mode, target, edge_density=edge_density, zoom=atlas_zoom),
-        scroll_zoom=gesture_zoom,
-    )
-    _render_color_legend(plot_frame, color_by)
-
-    if "coarse_family" in frame.columns:
-        with st.expander("Cluster-family audit"):
-            confusion = pd.crosstab(frame["cluster"], frame["coarse_family"].fillna("unknown"))
-            heatmap = px.imshow(
-                confusion,
-                aspect="auto",
-                color_continuous_scale="Cividis",
-                title="Cluster vs coarse family counts",
-            )
-            heatmap.update_layout(height=SECONDARY_PLOT_HEIGHT)
-            _apply_analytics_style(heatmap)
-            _plotly_chart(heatmap)
-            st.dataframe(cache.cluster_summary, width="stretch", height=SECONDARY_PLOT_HEIGHT, hide_index=True)
-
-
 def _render_profiles_tab(cache: DashboardCache, selected_cluster: int) -> None:
     profiles = cache.cluster_profiles
     if profiles.empty:
@@ -1606,16 +1801,38 @@ def _render_profiles_tab(cache: DashboardCache, selected_cluster: int) -> None:
     if subset.empty:
         st.info("No profile rows are available for the selected cluster.")
         return
+    frozen_aggregates = "role_name" in subset.columns
     fig = px.line(
-        subset,
+        subset.sort_values("depth"),
         x="depth",
         y="log_alpha",
         color="role",
-        title=f"Cluster {selected_cluster} mean role traces",
+        markers=frozen_aggregates,
+        hover_data=["role_name"] if frozen_aggregates else None,
+        title=(
+            f"Cluster {selected_cluster} frozen role profile"
+            if frozen_aggregates
+            else f"Cluster {selected_cluster} mean role traces"
+        ),
     )
+    if frozen_aggregates:
+        role_ticks = subset.loc[:, ["depth", "role_name"]].drop_duplicates().sort_values("depth")
+        fig.update_xaxes(
+            tickmode="array",
+            tickvals=role_ticks["depth"].tolist(),
+            ticktext=role_ticks["role_name"].tolist(),
+            title_text="canonical role",
+        )
+        fig.update_yaxes(title_text="mean log1p(stored DKS alpha)")
     fig.update_layout(height=PLOT_HEIGHT)
     _apply_analytics_style(fig)
-    _plotly_chart(fig)
+    provenance = cache.manifest.get("provenance", {})
+    run_id = (
+        provenance.get("run_id", cache.cache_dir.name)
+        if isinstance(provenance, dict)
+        else cache.cache_dir.name
+    )
+    _plotly_chart(fig, key=f"htsr:{run_id}:profiles:alpha")
 
 
 def _method_evidence_display_tables(
@@ -1637,127 +1854,421 @@ def _method_evidence_display_tables(
     return display_family, display_prediction
 
 
-def _render_method_evidence(study_dir: Path, cache: DashboardCache) -> None:
-    family, prediction = load_method_study_tables(study_dir)
-    st.metric("Atlas cache rows", f"{len(cache.metadata):,}")
-    display_family, display_prediction = _method_evidence_display_tables(
-        family,
-        prediction,
-        atlas_rows=len(cache.metadata),
+def _frozen_metric(section: object, metric: str, *, method: str = "combined") -> float | None:
+    if isinstance(section, dict):
+        method_values = section.get(method)
+        if isinstance(method_values, dict) and metric in method_values:
+            return _finite_number(method_values.get(metric))
+        return _finite_number(section.get(metric))
+    if isinstance(section, list):
+        for row in section:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("method", method)) != method or str(row.get("metric", "")) != metric:
+                continue
+            return _finite_number(row.get("estimate", row.get("value")))
+    return None
+
+
+def _finite_number(value: object) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if np.isfinite(numeric) else None
+
+
+def _lineage_display_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    if "cluster" in frame.columns:
+        clusters = pd.to_numeric(frame["cluster"], errors="coerce")
+        return frame.loc[clusters.ge(0)].copy()
+    if "predicted_family" in frame.columns:
+        return frame.loc[frame["predicted_family"].notna()].copy()
+    return frame.iloc[0:0].copy()
+
+
+def _render_cards(cards: list[dict[str, str]]) -> None:
+    columns = st.columns(len(cards))
+    for column, card in zip(columns, cards, strict=False):
+        column.metric(card["label"], card["value"], card.get("delta"), delta_color="off")
+
+
+def _performance_target_values(outputs: StudyOutputs, target: str) -> dict[str, float | None]:
+    primary = outputs.performance_metrics.get("primary", {})
+    primary_target = str(primary.get("target", "modern_average")) if isinstance(primary, dict) else "modern_average"
+    values: dict[str, float | None] = {
+        "group_weighted_mae": None,
+        "spearman": None,
+        "htsr_delta_mae": None,
+        "htsr_ci_low": None,
+        "htsr_ci_high": None,
+        "n_models": None,
+        "n_components": None,
+    }
+    if target == primary_target:
+        values.update({key: _finite_number(value) for key, value in outputs.performance_summary.items()})
+
+    development = outputs.performance_metrics.get("development", [])
+    if isinstance(development, list):
+        for row in development:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("target")) == target and str(row.get("feature_block")) == "M+S+H":
+                values["group_weighted_mae"] = _finite_number(row.get("group_weighted_mae"))
+                values["spearman"] = _finite_number(row.get("spearman"))
+                values["n_models"] = _finite_number(row.get("n_models"))
+                values["n_components"] = _finite_number(row.get("n_components"))
+                break
+
+    increment: object = outputs.performance_metrics.get("primary_increment", {})
+    if target != primary_target:
+        increment = next(
+            (
+                row
+                for row in outputs.performance_metrics.get("secondary_increments", [])
+                if isinstance(row, dict) and str(row.get("target")) == target
+            ),
+            {},
+        )
+    if isinstance(increment, dict):
+        values["htsr_delta_mae"] = _finite_number(
+            increment.get("delta_mae", increment.get("htsr_delta_mae", values["htsr_delta_mae"]))
+        )
+        values["htsr_ci_low"] = _finite_number(
+            increment.get("ci_low", increment.get("htsr_ci_low", values["htsr_ci_low"]))
+        )
+        values["htsr_ci_high"] = _finite_number(
+            increment.get("ci_high", increment.get("htsr_ci_high", values["htsr_ci_high"]))
+        )
+    return values
+
+
+def _external_status_for_target(outputs: StudyOutputs, target: str) -> str:
+    evaluated_target = outputs.performance_summary.get("external_target")
+    if evaluated_target is None or str(evaluated_target) != str(target):
+        return "Not evaluated"
+    if outputs.external_status == "descriptive_reuse":
+        return "Reused only"
+    return str(outputs.external_status).replace("_", " ").title()
+
+
+def _render_frozen_prediction(outputs: StudyOutputs, cache: DashboardCache, target: str) -> None:
+    run_id = str(outputs.provenance.get("run_id", outputs.run_dir.name))
+    predictions = cache.predictions.get(target, pd.DataFrame())
+    values = _performance_target_values(outputs, target)
+    interval = (
+        f"[{_format_number(values['htsr_ci_low'])}, {_format_number(values['htsr_ci_high'])}]"
+        if values["htsr_ci_low"] is not None and values["htsr_ci_high"] is not None
+        else "n/a"
     )
-    if not family.empty:
-        st.markdown("**Method-comparison study: family retrieval and leakage controls**")
-        st.caption("These rows come from the method-study artifact; `study_models` is its sampled/balanced population.")
-        st.dataframe(display_family, width="stretch", height=SECONDARY_PLOT_HEIGHT, hide_index=True)
-    if not prediction.empty:
-        st.markdown("**Method-comparison study: prediction-neighborhood metrics**")
-        st.caption("Residual metrics here use labeled rows from the method-study artifact, not a dashboard render cap.")
-        st.dataframe(display_prediction, width="stretch", height=SECONDARY_PLOT_HEIGHT, hide_index=True)
+    model_count = int(values["n_models"]) if values["n_models"] is not None else len(predictions)
+    component_count = (
+        f"{int(values['n_components']):,}"
+        if values["n_components"] is not None
+        else "n/a"
+    )
+    primary_status = (
+        "claim passed"
+        if outputs.performance_summary.get("primary_passed") is True
+        else "claim failed"
+    )
+    if target != "modern_average":
+        primary_status = "descriptive"
+    _render_cards(
+        [
+            {
+                "label": "OOF models / groups",
+                "value": f"{model_count:,} / {component_count}",
+            },
+            {"label": "Grouped MAE", "value": _format_number(values["group_weighted_mae"])},
+            {"label": "Model Spearman", "value": _format_number(values["spearman"])},
+            {
+                "label": "HTSR dMAE",
+                "value": _format_number(values["htsr_delta_mae"]),
+                "delta": primary_status,
+            },
+            {"label": "95% interval", "value": interval},
+            {"label": "External", "value": _external_status_for_target(outputs, target)},
+        ]
+    )
+    st.caption(
+        "Frozen development out-of-fold M+S+H predictions. MAE is component "
+        "weighted; Spearman is model-level descriptive."
+    )
+    labeled = _labeled_prediction_rows(predictions)
+    if labeled.empty:
+        st.info("No finite frozen development predictions are available for this target.")
+        return
 
-    report_path = study_dir / "method_decision_report.md"
-    if report_path.exists():
-        with st.expander("Audit report"):
+    plot_frame = labeled.copy()
+    plot_frame["hover_model"] = plot_frame["display_name"].map(
+        lambda value: _display_model_name(value, limit=48)
+    )
+    dark = _is_dark_theme()
+    scatter = px.scatter(
+        plot_frame,
+        x="actual",
+        y="prediction",
+        color="absolute_error",
+        custom_data=["hover_model", "actual", "prediction", "absolute_error"],
+        color_continuous_scale=_prediction_error_color_scale(dark=dark),
+        title=f"{target}: frozen OOF prediction",
+        render_mode="webgl",
+    )
+    lower = float(np.nanmin([plot_frame["actual"].min(), plot_frame["prediction"].min()]))
+    upper = float(np.nanmax([plot_frame["actual"].max(), plot_frame["prediction"].max()]))
+    scatter.add_shape(
+        type="line",
+        x0=lower,
+        y0=lower,
+        x1=upper,
+        y1=upper,
+        line={"dash": "dash", "color": "rgba(226,232,240,0.72)" if dark else "rgba(15,23,42,0.48)"},
+    )
+    scatter.update_traces(
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>actual %{customdata[1]:.3f}<br>"
+            "predicted %{customdata[2]:.3f}<br>|error| %{customdata[3]:.3f}<extra></extra>"
+        ),
+        marker={"size": 6, "opacity": 0.84, "line": {"width": 0}},
+    )
+    scatter.update_layout(height=PLOT_HEIGHT, coloraxis_showscale=False, showlegend=False)
+    _apply_analytics_style(scatter, dark=dark)
+    _plotly_chart(
+        scatter,
+        key=f"htsr:{run_id}:prediction:{target}:scatter",
+        scroll_zoom=False,
+    )
+
+    histogram = px.histogram(
+        plot_frame,
+        x="absolute_error",
+        nbins=40,
+        title="Frozen absolute-error distribution",
+    )
+    histogram.update_layout(height=SECONDARY_PLOT_HEIGHT, showlegend=False)
+    _apply_analytics_style(histogram)
+    _plotly_chart(
+        histogram,
+        key=f"htsr:{run_id}:prediction:{target}:error-histogram",
+        scroll_zoom=False,
+    )
+    st.dataframe(
+        plot_frame.sort_values("absolute_error", ascending=False),
+        width="stretch",
+        height=SECONDARY_PLOT_HEIGHT,
+        hide_index=True,
+    )
+
+
+def _render_frozen_lineage(
+    outputs: StudyOutputs,
+    frame: pd.DataFrame,
+    *,
+    color_by: str,
+    size_by: str,
+    edge_density: str,
+    gesture_zoom: bool,
+    atlas_zoom: float,
+) -> None:
+    run_id = str(outputs.provenance.get("run_id", outputs.run_dir.name))
+    open_set = outputs.lineage_metrics.get("open_set", outputs.lineage_metrics.get("open_set_metrics", {}))
+    coverage = _frozen_metric(open_set, "scorable_coverage")
+    family_count = outputs.lineage_summary.get("n_families")
+    query_count = outputs.lineage_summary.get("n_queries")
+    lineage_status = (
+        "Inferential"
+        if outputs.lineage_summary.get("inferential") is True
+        else "Descriptive"
+    )
+    _render_cards(
+        [
+            {"label": "Root top-1", "value": _format_percent(outputs.lineage_summary.get("root_macro_top1"))},
+            {
+                "label": "Known-family top-1",
+                "value": _format_percent(
+                    outputs.lineage_summary.get("observed_family_top1")
+                ),
+                "delta": "descriptive",
+            },
+            {"label": "Unknown AUROC", "value": _format_number(outputs.lineage_summary.get("unknown_auroc"))},
+            {"label": "OSCR", "value": _format_number(outputs.lineage_summary.get("oscr"))},
+            {"label": "Coverage", "value": _format_percent(coverage)},
+            {
+                "label": "Queries / families",
+                "value": (
+                    f"{int(query_count):,} / {int(family_count):,}"
+                    if query_count is not None and family_count is not None
+                    else "n/a"
+                ),
+                "delta": lineage_status,
+            },
+        ]
+    )
+    st.caption(
+        "Frozen canonical-root retrieval, descriptive query-excluded known-family "
+        "attribution, and leave-one-family-out open-set metrics."
+    )
+    lineage = _lineage_display_frame(frame)
+    if lineage.empty:
+        st.info("No frozen clustered models match the current filters.")
+        return
+    st.caption(
+        f"{len(lineage):,} clustered models shown; family predictions are available "
+        "only for eligible audited queries."
+    )
+    _plotly_chart(
+        _plot_galaxy(
+            lineage,
+            color_by,
+            size_by,
+            "2D cluster galaxy",
+            edge_density=edge_density,
+            zoom=atlas_zoom,
+        ),
+        key=f"htsr:{run_id}:lineage:galaxy",
+        scroll_zoom=gesture_zoom,
+    )
+    _render_color_legend(lineage, color_by)
+    st.dataframe(
+        lineage,
+        width="stretch",
+        height=SECONDARY_PLOT_HEIGHT,
+        hide_index=True,
+    )
+
+
+def _render_frozen_evidence(outputs: StudyOutputs) -> None:
+    provenance_values = []
+    if "estimator_provenance" in outputs.lineage_predictions.columns:
+        provenance_values = sorted(
+            outputs.lineage_predictions["estimator_provenance"].dropna().astype(str).unique().tolist()
+        )
+    st.warning(
+        "Stored alpha values use the DKS power-law estimator, not the paper's fixed-Hill estimator. "
+        "The frozen tables cannot reproduce fixed-Hill estimates without raw spectral inputs."
+    )
+    st.markdown("**Estimator provenance**")
+    st.dataframe(
+        pd.DataFrame(
+            {
+                "field": ["feature schema", "lineage estimator provenance", "run"],
+                "value": [
+                    str(outputs.provenance.get("feature_schema_version", "not recorded")),
+                    "; ".join(provenance_values) if provenance_values else "stored DKS artifact contract",
+                    str(outputs.provenance.get("run_id", outputs.run_dir.name)),
+                ],
+            }
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+    with st.expander("Frozen lineage metrics"):
+        st.json(dict(outputs.lineage_metrics))
+    with st.expander("Frozen performance metrics"):
+        st.json(dict(outputs.performance_metrics))
+    with st.expander("Frozen exclusions"):
+        st.dataframe(outputs.exclusions, width="stretch", height=SECONDARY_PLOT_HEIGHT, hide_index=True)
+    report_path = outputs.run_dir / "report.md"
+    with st.expander("Frozen report"):
+        try:
             st.markdown(report_path.read_text(encoding="utf-8"))
+        except OSError as error:
+            st.error(f"The frozen report is unavailable: {error}")
 
 
-def render_ablation_atlas() -> None:
+def render_ablation_atlas(run_path: str | Path | None = None) -> None:
     _render_dashboard_chrome()
     st.title("Spectral Atlas")
-    st.caption("Model Zoo ablation cache for cluster structure, lineage tracing and benchmark prediction evidence.")
+    st.caption("Read-only lineage and performance evidence from one explicit frozen study run.")
 
+    configured_path = str(run_path) if run_path is not None else os.environ.get("HTSR_STUDY_RUN", "")
     with st.sidebar:
-        st.subheader("Controls")
-        with st.expander("Data source", expanded=False):
-            metrics_dir = Path(st.text_input("Metrics directory", value=str(DEFAULT_ABLATION_METRICS_DIR)))
-            metadata_csv = Path(st.text_input("Metadata CSV", value=str(DEFAULT_ABLATION_METADATA)))
-            cache_dir = Path(st.text_input("Cache directory", value=str(DEFAULT_CACHE_DIR)))
-            study_dir = Path(st.text_input("Method-study directory", value=str(DEFAULT_ABLATION_STUDY_DIR)))
+        st.subheader("Frozen run")
+        if run_path is None:
+            configured_path = st.text_input(
+                "Run directory",
+                value=configured_path,
+                placeholder="research_runs/.../<run-id>",
+            ).strip()
+        else:
+            st.caption(configured_path)
 
-        with st.expander("Cache build", expanded=False):
-            n_bins = st.slider(
-                "Depth bins",
-                min_value=8,
-                max_value=48,
-                value=_cached_config_value(cache_dir, "n_bins", default=24, minimum=8, maximum=48),
-                step=4,
-            )
-            cluster_min, cluster_max, cluster_value = _cluster_slider_values(cache_dir, metrics_dir)
-            n_clusters = st.slider(
-                "Clusters",
-                min_value=cluster_min,
-                max_value=cluster_max,
-                value=cluster_value,
-            )
-            n_neighbors = st.slider(
-                "Prediction neighbors",
-                min_value=1,
-                max_value=10,
-                value=_cached_config_value(cache_dir, "n_neighbors", default=3, minimum=1, maximum=10),
-            )
-            force_rebuild = st.button("Rebuild cache")
+    if not configured_path:
+        st.warning("Frozen study unavailable")
+        st.caption("Provide an explicit run directory in the sidebar or set HTSR_STUDY_RUN.")
+        return
 
-    progress_bar = st.progress(0.0, text="Loading dashboard cache")
+    progress_bar = st.progress(0.0, text="0% Loading frozen study")
     status = st.empty()
+    try:
+        progress_bar.progress(0.15, text="15% Validating run files")
+        status.caption("Reading validated frozen CSV and JSON outputs.")
+        run_state_token = _frozen_run_state_token(configured_path)
+        outputs = _cached_study_outputs(configured_path, run_state_token)
+        progress_bar.progress(0.75, text="75% Preparing display tables")
+        status.caption("Adapting frozen tables for the 2D viewer.")
+        cache = _dashboard_cache_from_study(outputs)
+        progress_bar.progress(1.0, text="100% Frozen study loaded")
+    except Exception as error:
+        progress_bar.empty()
+        status.empty()
+        st.error("Frozen study unavailable")
+        st.caption(str(error))
+        return
+    progress_bar.empty()
+    status.empty()
 
-    def progress(fraction: float, message: str) -> None:
-        progress_bar.progress(fraction, text=f"{fraction * 100:0.0f}% {message}")
-        status.caption(message)
+    _render_cards(_study_summary_cards(outputs))
+    st.caption(f"Run: {outputs.run_dir}")
 
-    config = DashboardCacheConfig(n_bins=n_bins, n_clusters=n_clusters, n_neighbors=n_neighbors)
-    fingerprint = source_fingerprint(metrics_dir, metadata_csv, settings=asdict(config))
-    manifest_exists = (cache_dir / "manifest.json").exists()
-    cache_valid = manifest_exists and cache_is_valid(cache_dir, fingerprint)
-    if manifest_exists and not force_rebuild and not cache_valid:
-        status.caption("Cache source or settings changed; rebuilding.")
-    cache = load_or_build_dashboard_cache(
-        metrics_dir,
-        metadata_csv,
-        cache_dir,
-        config=config,
-        force=force_rebuild,
-        progress=progress,
-    )
-
-    frame = cache.metadata.copy()
+    panel = st.radio("View", options=_panel_options(), horizontal=True)
     targets = _target_options(cache)
-    target = None
+    target = targets[0] if targets else None
     with st.sidebar:
-        with st.expander("Target", expanded=True):
-            target = st.selectbox("Performance target", options=targets, index=0 if targets else None) if targets else None
-    frame = _with_display_columns(frame, target)
+        if targets:
+            target = st.selectbox("Performance target", options=targets, index=0)
 
+    frame = _with_display_columns(cache.metadata.copy(), target)
     with st.sidebar:
-        with st.expander("View", expanded=True):
-            view_mode = "2D cluster galaxy"
-            search_text = st.text_input("Search models", value="", placeholder="name fragment")
-            color_by = st.selectbox("Color", options=_color_options(frame, target))
-            size_options = ["fixed"]
-            for column in ("#Params (B)", f"{target} absolute_error" if target else "", "overall_log_alpha"):
-                if column and column in frame.columns:
-                    size_options.append(column)
-            size_by = st.selectbox("Size", options=size_options)
-            edge_density = st.selectbox("Edges", options=["fast", "balanced", "dense", "off"], index=0)
-            gesture_zoom = st.checkbox("Atlas gesture zoom", value=True)
-            atlas_zoom_control = st.slider("Atlas zoom", min_value=1.0, max_value=6.0, value=1.0, step=0.1)
-            atlas_zoom = _atlas_zoom_from_control(atlas_zoom_control)
-            if atlas_zoom > 1.0:
-                st.caption(f"Effective zoom {atlas_zoom:.1f}x")
+        st.subheader("View controls")
+        search_text = st.text_input("Search models", value="", placeholder="name fragment")
+        if panel == "Lineage":
+            color_options = _lineage_color_options(frame)
+        else:
+            color_options = _color_options(frame, target)
+        color_by = st.selectbox("Color", options=color_options or ["Predicted cluster"])
+        size_options = ["fixed"]
+        for column in ("#Params (B)", f"{target} absolute_error" if target else "", "overall_log_alpha"):
+            if column and column in frame.columns:
+                size_options.append(column)
+        size_by = st.selectbox("Size", options=size_options)
+        edge_density = st.selectbox("Edges", options=["fast", "balanced", "dense", "off"], index=0)
+        gesture_zoom = st.checkbox("Galaxy gesture zoom", value=False)
+        atlas_zoom_control = st.slider("Galaxy zoom", min_value=1.0, max_value=6.0, value=1.0, step=0.1)
+        atlas_zoom = _atlas_zoom_from_control(atlas_zoom_control)
 
         with st.expander("Filters", expanded=False):
-            families = []
+            families: list[str] = []
             if "coarse_family" in frame.columns:
                 families = st.multiselect(
                     "Families",
                     options=sorted(frame["coarse_family"].dropna().astype(str).unique().tolist()),
                     default=[],
                 )
-            architectures = []
-            if "Architecture" in frame.columns:
+            architecture_column = next(
+                (column for column in ("Architecture", "architecture") if column in frame.columns),
+                None,
+            )
+            architectures: list[str] = []
+            if architecture_column is not None:
                 architectures = st.multiselect(
                     "Architectures",
-                    options=sorted(frame["Architecture"].dropna().astype(str).unique().tolist()),
+                    options=sorted(frame[architecture_column].dropna().astype(str).unique().tolist()),
                     default=[],
                 )
+                if architecture_column != "Architecture":
+                    frame["Architecture"] = frame[architecture_column]
             clusters = st.multiselect(
                 "Clusters",
                 options=sorted(frame["cluster"].dropna().astype(int).unique().tolist()),
@@ -1765,83 +2276,62 @@ def render_ablation_atlas() -> None:
             )
 
     filtered = _filter_frame(frame, families, architectures, clusters, search_text=search_text)
-    with st.sidebar:
-        with st.expander("Render budget", expanded=False):
-            max_renderable, default_rendered = _render_point_bounds(len(filtered), edge_density)
-            if max_renderable > 1:
-                min_renderable = min(max_renderable, max(1, int(round(np.sqrt(max(len(filtered), 1))))))
-                rendered_points = st.slider(
-                    "Rendered points",
-                    min_value=min_renderable,
-                    max_value=max_renderable,
-                    value=max(min_renderable, min(default_rendered, max_renderable)),
-                    step=max(1, max_renderable // 80),
-                )
-            else:
-                rendered_points = max_renderable
-
-    _render_metric_cards(cache, filtered, target)
-
-    selected_cluster = int(filtered["cluster"].mode().iloc[0]) if not filtered.empty else 0
-    panel = st.radio(
-        "View",
-        options=_panel_options(),
-        horizontal=True,
-    )
     if panel == "Atlas":
-        if filtered.empty:
-            st.info("No models match the current filters.")
+        atlas_frame = _lineage_display_frame(filtered)
+        if atlas_frame.empty:
+            st.info("No clustered models match the current filters.")
         else:
-            plot_frame = _cap_render_frame(filtered, rendered_points)
-            st.caption(f"Rendering {len(plot_frame):,} of {len(filtered):,} filtered models.")
+            st.caption(
+                f"{len(atlas_frame):,} clustered models rendered from "
+                f"{len(filtered):,} filtered rows; Data retains every loaded row."
+            )
             _plotly_chart(
                 _plot_galaxy(
-                    plot_frame,
+                    atlas_frame,
                     color_by,
                     size_by,
-                    view_mode,
+                    "2D cluster galaxy",
                     target=target,
                     edge_density=edge_density,
                     zoom=atlas_zoom,
                 ),
+                key=(
+                    f"htsr:{outputs.provenance.get('run_id', outputs.run_dir.name)}:atlas:galaxy"
+                ),
                 scroll_zoom=gesture_zoom,
             )
-            _render_color_legend(plot_frame, color_by)
+            _render_color_legend(atlas_frame, color_by)
     elif panel == "Prediction":
         if target is None:
-            st.info("No benchmark target is available.")
+            st.info("No frozen development target is available.")
         else:
-            _render_prediction_tab(cache, target)
+            _render_frozen_prediction(outputs, cache, target)
     elif panel == "Lineage":
-        _render_lineage_tab(
-            cache,
-            target,
+        _render_frozen_lineage(
+            outputs,
             filtered,
-            color_by,
-            size_by,
-            view_mode,
-            rendered_points,
-            edge_density,
-            gesture_zoom,
-            atlas_zoom,
+            color_by=color_by,
+            size_by=size_by,
+            edge_density=edge_density,
+            gesture_zoom=gesture_zoom,
+            atlas_zoom=atlas_zoom,
         )
     elif panel == "Profiles":
-        cluster_choice = st.selectbox(
-            "Cluster",
-            options=sorted(frame["cluster"].dropna().astype(int).unique().tolist()),
-            index=sorted(frame["cluster"].dropna().astype(int).unique().tolist()).index(selected_cluster)
-            if selected_cluster in set(frame["cluster"].dropna().astype(int))
-            else 0,
-        )
-        _render_profiles_tab(cache, int(cluster_choice))
+        cluster_options = sorted(frame["cluster"].dropna().astype(int).unique().tolist())
+        if not cluster_options:
+            st.info("No frozen cluster profiles are available.")
+        else:
+            cluster_choice = st.selectbox("Cluster", options=cluster_options, index=0)
+            _render_profiles_tab(cache, int(cluster_choice))
+            st.dataframe(cache.cluster_summary, width="stretch", height=SECONDARY_PLOT_HEIGHT, hide_index=True)
     elif panel == "Evidence":
-        _render_method_evidence(study_dir, cache)
+        _render_frozen_evidence(outputs)
     elif panel == "Data":
-        st.caption(f"{len(filtered):,} filtered rows from the {len(cache.metadata):,}-model persistent atlas cache.")
+        st.caption(f"{len(filtered):,} filtered rows from {len(outputs.atlas):,} loaded atlas models.")
         st.dataframe(filtered, width="stretch", height=TABLE_HEIGHT, hide_index=True)
         st.download_button(
             "Download current atlas rows",
             data=filtered.to_csv(index=False).encode("utf-8"),
-            file_name="ablation_spectral_atlas_rows.csv",
+            file_name="frozen_spectral_atlas_rows.csv",
             mime="text/csv",
         )

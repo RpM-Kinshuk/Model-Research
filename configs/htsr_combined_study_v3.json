@@ -1,0 +1,16 @@
+{
+  "protocol_version": "htsr-combined-study-v3",
+  "random_seed": 17,
+  "bootstrap_replicates": 2000,
+  "signflip_replicates": 10000,
+  "outer_folds": 5,
+  "inner_folds": 4,
+  "ridge_alphas": [0.01, 0.1, 1, 10, 100],
+  "minimum_components": 10,
+  "minimum_lineage_families": 10,
+  "min_feature_coverage": 0.8,
+  "min_pair_coverage": 0.8,
+  "min_role_coverage": 0.8,
+  "cluster_count_rule": "sqrt_half",
+  "external_evidence_role": "reused_descriptive"
+}

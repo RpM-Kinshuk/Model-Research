@@ -12,7 +12,8 @@ Operational source of truth:
 - curated tables: `Model-Zoo/data/curated/`
 - analysis outputs: `Model-Zoo/analysis_runs/phase2/`
 
-`Model-Research` owns the phase-3 experiments and reports that consume those operational inputs.
+`Model-Research` owns the HTSR v3 study and frozen reports that consume those
+operational inputs. See `docs/HTSR_STUDY.md` for the current method and evidence.
 
 For the actual phase-2 run shape, use:
 

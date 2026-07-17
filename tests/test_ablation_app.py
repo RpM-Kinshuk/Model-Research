@@ -1,36 +1,48 @@
 import json
+import inspect
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
+
+import alpha_cluster_dashboard.ablation_app as ablation_app
 
 from alpha_cluster_dashboard.ablation_app import (
     PLOT_CONFIG,
     _atlas_zoom_from_control,
     _cached_config_value,
-    _cap_render_frame,
+    _frozen_run_state_token,
     _category_color_map,
     _chart_theme_tokens,
     _cluster_galaxy_layout,
     _color_options,
     _dashboard_summary_cards,
+    _dashboard_cache_from_study,
     _dashboard_theme_tokens,
     _display_model_name,
     _dynamic_hover_columns,
     _edge_limit_for_density,
+    _external_status_for_target,
     _figure_axis_ranges,
     _filter_frame,
+    _frozen_cluster_profiles,
     _galaxy_neighbor_edge_traces,
     _galaxy_arm_edges,
     _galaxy_arm_trace_styles,
     _lineage_quality_metrics,
+    _lineage_display_frame,
     _lineage_edge_coordinates,
+    _lineage_color_options,
     _method_evidence_display_tables,
     _plot_cluster_galaxy,
     _plot_config,
     _plot_galaxy,
     _panel_options,
     _plot_prediction_lineage,
+    _plotly_chart,
+    _performance_target_values,
     _prediction_error_color_scale,
     _prediction_hover_template,
     _prediction_metric_cards,
@@ -42,8 +54,11 @@ from alpha_cluster_dashboard.ablation_app import (
     _settled_cluster_centers,
     _scaled_marker_size,
     _target_options,
+    _study_summary_cards,
     _with_display_columns,
+    render_ablation_atlas,
 )
+from alpha_cluster_dashboard.study_outputs import StudyOutputs
 
 
 def _frame(rows: int) -> pd.DataFrame:
@@ -60,14 +75,361 @@ def _frame(rows: int) -> pd.DataFrame:
     )
 
 
-def test_cap_render_frame_is_deterministic_and_keeps_requested_size():
-    frame = _frame(2000)
+def _frozen_outputs(tmp_path: Path, rows: int = 6) -> StudyOutputs:
+    model_ids = [f"org/model-{index}" for index in range(rows)]
+    manifest = pd.DataFrame({"model_id": model_ids})
+    assignments = pd.DataFrame(
+        {"model_id": model_ids, "cluster": [index % 2 for index in range(rows)]}
+    )
+    performance = pd.DataFrame(
+        {
+            "model_id": model_ids,
+            "target": ["modern_average"] * rows,
+            "feature_block": ["M+S+H"] * rows,
+            "actual": np.arange(rows, dtype=float),
+            "prediction": np.arange(rows, dtype=float) + 0.2,
+        }
+    )
+    atlas = manifest.merge(assignments, on="model_id")
+    atlas["display_name"] = atlas["model_id"]
+    atlas["coarse_family"] = "root/a"
+    return StudyOutputs(
+        run_dir=tmp_path,
+        provenance={"run_id": "test"},
+        manifest=manifest,
+        features=manifest.copy(),
+        atlas=atlas,
+        cluster_assignments=assignments,
+        lineage_predictions=pd.DataFrame(),
+        representative_lineage_predictions=pd.DataFrame(),
+        performance_predictions=performance,
+        exclusions=pd.DataFrame(),
+        lineage_metrics={},
+        performance_metrics={},
+        lineage_summary={
+            "root_macro_top1": 0.75,
+            "mrr": 0.8,
+            "unknown_auroc": 0.7,
+            "oscr": 0.6,
+            "n_queries": rows,
+            "n_families": 3,
+            "n_open_folds": 3,
+            "minimum_families": 10,
+            "inferential": False,
+            "observed_family_top1": 0.9,
+            "observed_spectral_shape_top1": 0.9,
+            "observed_htsr_lift": 0.0,
+            "observed_family_queries": rows,
+            "observed_family_families": 3,
+        },
+        performance_summary={
+            "group_weighted_mae": 1.2,
+            "spearman": 0.65,
+            "htsr_delta_mae": -0.3,
+            "relative_mae_improvement": 0.04,
+            "primary_passed": False,
+            "primary_reasons": ["relative_improvement_below_threshold"],
+            "target": "modern_average",
+            "external_target": "modern_average",
+            "n_models": rows,
+            "n_components": 3,
+        },
+        summary={
+            "n_models": rows,
+            "n_feature_models": rows,
+            "n_clustered_models": rows,
+            "n_lineage_models": 0,
+            "n_performance_models": rows,
+            "n_exclusions": 0,
+        },
+        external_status="unavailable",
+    )
 
-    first = _cap_render_frame(frame, limit=500)
-    second = _cap_render_frame(frame, limit=500)
 
-    assert len(first) == 500
-    assert first["display_name"].tolist() == second["display_name"].tolist()
+def test_live_dashboard_entrypoint_loads_frozen_outputs_without_fitting_cache() -> None:
+    source = inspect.getsource(render_ablation_atlas)
+
+    assert "_cached_study_outputs" in source
+    assert "load_or_build_dashboard_cache" not in source
+    assert "source_fingerprint" not in source
+    assert "Rendered points" not in source
+
+
+def test_frozen_run_state_token_changes_when_an_artifact_changes(tmp_path: Path) -> None:
+    run = tmp_path / "htsr_run"
+    run.mkdir()
+    artifact = run / "manifest.csv"
+    artifact_manifest = run / "artifact_manifest.json"
+    artifact.write_text("model_id\na/model\n", encoding="utf-8")
+    artifact_manifest.write_text('{"version": 1}\n', encoding="utf-8")
+    first = _frozen_run_state_token(run)
+
+    artifact.write_text("model_id\nb/model\n", encoding="utf-8")
+    artifact_manifest.write_text('{"version": 2}\n', encoding="utf-8")
+    second = _frozen_run_state_token(run)
+
+    assert first != second
+
+
+def test_frozen_loader_cache_is_disk_persistent_and_used_by_entrypoint() -> None:
+    module_source = inspect.getsource(ablation_app)
+    entrypoint_source = inspect.getsource(render_ablation_atlas)
+
+    assert '@st.cache_data(show_spinner=False, persist="disk")' in module_source
+    assert "_cached_study_outputs(configured_path, run_state_token)" in entrypoint_source
+
+
+def test_frozen_study_adapter_exposes_all_rows_and_oof_predictions(tmp_path: Path) -> None:
+    outputs = _frozen_outputs(tmp_path, rows=9)
+
+    cache = _dashboard_cache_from_study(outputs)
+
+    assert len(cache.metadata) == 9
+    assert set(cache.predictions) == {"modern_average"}
+    assert len(cache.predictions["modern_average"]) == 9
+    assert int(cache.cluster_summary["size"].sum()) == 9
+
+
+def test_frozen_study_adapter_preserves_unassigned_clusters_as_missing(tmp_path: Path) -> None:
+    outputs = _frozen_outputs(tmp_path, rows=5)
+    atlas = outputs.atlas.copy()
+    atlas.loc[atlas.index[-1], "cluster"] = np.nan
+    atlas["H__q_proj__alpha__median"] = np.arange(5, dtype=float) + 1.0
+    outputs = replace(outputs, atlas=atlas)
+
+    cache = _dashboard_cache_from_study(outputs)
+
+    assert str(cache.metadata["cluster"].dtype) == "Int64"
+    assert cache.metadata.loc[cache.metadata.index[-1], "cluster"] is pd.NA
+    assert -1 not in cache.cluster_summary["cluster"].tolist()
+    assert -1 not in cache.cluster_profiles["cluster"].tolist()
+    assert int(cache.cluster_summary["size"].sum()) == 4
+
+
+def test_frozen_study_adapter_handles_missing_lineage_correctness(tmp_path: Path) -> None:
+    outputs = _frozen_outputs(tmp_path, rows=3)
+    outputs.atlas["correct"] = pd.Series([True, pd.NA, False], dtype="boolean")
+
+    cache = _dashboard_cache_from_study(outputs)
+
+    assert cache.metadata["Lineage correctness"].tolist() == [
+        "correct",
+        "unavailable",
+        "incorrect",
+    ]
+
+
+def test_frozen_study_adapter_exposes_lineage_endpoint(tmp_path: Path) -> None:
+    outputs = _frozen_outputs(tmp_path, rows=3)
+    outputs.atlas["lineage_endpoint"] = [
+        "canonical_root",
+        "observed_family",
+        pd.NA,
+    ]
+
+    cache = _dashboard_cache_from_study(outputs)
+
+    assert cache.metadata["Lineage endpoint"].tolist() == [
+        "canonical root",
+        "observed family",
+        "unavailable",
+    ]
+
+
+def test_frozen_study_adapter_does_not_materialize_unused_dense_features(tmp_path: Path) -> None:
+    outputs = _frozen_outputs(tmp_path, rows=9)
+    outputs = replace(
+        outputs,
+        features=pd.DataFrame(
+            {
+                "model_id": outputs.manifest["model_id"],
+                "H__q_proj__alpha__median": np.arange(9, dtype=float),
+                "S__trajectory_length": np.arange(9, dtype=float) + 10.0,
+            }
+        ),
+    )
+
+    cache = _dashboard_cache_from_study(outputs)
+
+    assert cache.features.shape == (len(cache.metadata), 0)
+    assert cache.features.nbytes == 0
+    assert cache.feature_names == []
+
+
+def test_lineage_display_keeps_every_clustered_model_without_requiring_family_prediction() -> None:
+    frame = pd.DataFrame(
+        {
+            "model_id": ["a", "b", "c", "d"],
+            "cluster": [0, 1, -1, np.nan],
+            "predicted_family": ["root/a", pd.NA, pd.NA, "root/d"],
+        }
+    )
+
+    displayed = _lineage_display_frame(frame)
+
+    assert displayed["model_id"].tolist() == ["a", "b"]
+
+
+def test_study_summary_cards_use_frozen_scientific_metrics(tmp_path: Path) -> None:
+    cards = _study_summary_cards(_frozen_outputs(tmp_path, rows=7))
+    by_label = {card["label"]: card["value"] for card in cards}
+
+    assert by_label["Manifest models"] == "7"
+    assert by_label["Root top-1"] == "75.0%"
+    assert by_label["Known-family top-1"] == "90.0%"
+    assert by_label["Grouped MAE"] == "1.200"
+    assert by_label["HTSR dMAE"] == "-0.300"
+    assert by_label["External dMAE"] == "Unavailable"
+    root_card = next(card for card in cards if card["label"] == "Root top-1")
+    assert root_card["delta"] == "3 families / descriptive"
+    htsr_card = next(card for card in cards if card["label"] == "HTSR dMAE")
+    assert htsr_card["delta"] == "claim failed"
+    known_card = next(card for card in cards if card["label"] == "Known-family top-1")
+    assert known_card["delta"] == "HTSR lift +0.0 pp"
+
+
+def test_study_summary_cards_report_external_component_disjoint_effect(tmp_path: Path) -> None:
+    outputs = _frozen_outputs(tmp_path, rows=7)
+    outputs = replace(
+        outputs,
+        external_status="descriptive_reuse",
+        performance_summary={
+            **outputs.performance_summary,
+            "external_htsr_delta_mae": -0.1,
+            "external_n_models": 5,
+            "external_n_components": 3,
+            "external_evidence_role": "reused_descriptive",
+        },
+    )
+
+    external = next(
+        card for card in _study_summary_cards(outputs) if card["label"] == "External dMAE"
+    )
+
+    assert external["value"] == "-0.100"
+    assert external["delta"] == "reused; 5 / 3"
+
+
+def test_performance_target_values_include_oof_group_scope(tmp_path: Path) -> None:
+    outputs = _frozen_outputs(tmp_path, rows=7)
+
+    values = _performance_target_values(outputs, "modern_average")
+
+    assert values["n_models"] == 7
+    assert values["n_components"] == 3
+
+
+def test_external_status_is_only_shown_for_its_evaluated_target(
+    tmp_path: Path,
+) -> None:
+    outputs = replace(_frozen_outputs(tmp_path), external_status="descriptive_reuse")
+
+    assert _external_status_for_target(outputs, "modern_average") == "Reused only"
+    assert _external_status_for_target(outputs, "BBH") == "Not evaluated"
+
+
+def test_frozen_lineage_scope_card_uses_compact_dynamic_counts(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    captured: list[dict[str, str]] = []
+    monkeypatch.setattr(ablation_app, "_render_cards", captured.extend)
+    monkeypatch.setattr(ablation_app.st, "caption", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(ablation_app.st, "info", lambda *_args, **_kwargs: None)
+
+    ablation_app._render_frozen_lineage(
+        _frozen_outputs(tmp_path, rows=31),
+        pd.DataFrame(),
+        color_by="Predicted cluster",
+        size_by="fixed",
+        edge_density="fast",
+        gesture_zoom=False,
+        atlas_zoom=1.0,
+    )
+
+    scope = next(card for card in captured if card["label"] == "Queries / families")
+    assert scope["value"] == "31 / 3"
+    assert scope["delta"] == "Descriptive"
+
+
+def test_lineage_color_options_expose_prediction_endpoint() -> None:
+    frame = pd.DataFrame(
+        {
+            "Predicted cluster": ["C00"],
+            "Predicted family": ["root/a"],
+            "Lineage correctness": ["correct"],
+            "Lineage endpoint": ["canonical root"],
+        }
+    )
+
+    assert _lineage_color_options(frame) == [
+        "Predicted cluster",
+        "Predicted family",
+        "Lineage endpoint",
+        "Lineage correctness",
+    ]
+
+
+def test_atlas_renders_all_clustered_rows_without_inventing_an_unclustered_cluster() -> None:
+    source = inspect.getsource(render_ablation_atlas)
+
+    assert "atlas_frame = _lineage_display_frame(filtered)" in source
+    assert "every loaded row is rendered by default" not in source
+
+
+def test_frozen_cluster_profiles_parse_canonical_htsr_feature_names() -> None:
+    metadata = pd.DataFrame(
+        {
+            "cluster": [0, 0, 1],
+            "H__q_proj__alpha__median": [2.0, 4.0, 8.0],
+            "H__down_proj__alpha__median": [3.0, 5.0, 9.0],
+        }
+    )
+
+    profiles = _frozen_cluster_profiles(metadata)
+
+    assert set(profiles["cluster"]) == {0, 1}
+    assert set(profiles["role_name"]) == {"q_proj", "down_proj"}
+    assert profiles["log_alpha"].notna().all()
+
+
+def test_frozen_cluster_profiles_average_log1p_alpha_not_log1p_average_alpha() -> None:
+    metadata = pd.DataFrame(
+        {
+            "cluster": [0, 0],
+            "H__q_proj__alpha__median": [0.0, 8.0],
+        }
+    )
+
+    profiles = _frozen_cluster_profiles(metadata)
+
+    expected = float(np.mean(np.log1p([0.0, 8.0])))
+    assert profiles.loc[0, "log_alpha"] == expected
+
+
+def test_plotly_chart_uses_stable_streamlit_key_and_plotly_uirevision(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def capture_chart(fig, **kwargs) -> None:
+        captured["fig"] = fig
+        captured.update(kwargs)
+
+    monkeypatch.setattr(ablation_app.st, "plotly_chart", capture_chart)
+    figure = go.Figure()
+
+    _plotly_chart(figure, key="atlas:run-a", scroll_zoom=True)
+
+    assert captured["key"] == "atlas:run-a"
+    assert figure.layout.uirevision == "atlas:run-a"
+    assert captured["config"]["scrollZoom"] is True
+
+
+def test_unreachable_live_analysis_renderers_are_removed() -> None:
+    source = inspect.getsource(ablation_app)
+
+    assert "def _render_prediction_tab(" not in source
+    assert "def _render_lineage_tab(" not in source
+    assert "def _render_method_evidence(" not in source
 
 
 def test_filter_frame_supports_case_insensitive_model_search():
@@ -378,6 +740,83 @@ def test_cluster_galaxy_plot_has_readable_legend_hover_and_visible_edges():
     assert fig.data[0].line.width >= 1.0
     assert "rgba" in fig.data[0].line.color
     assert any(trace.name == "representative centers" for trace in fig.data)
+
+
+def test_predicted_cluster_legend_names_representative_models(monkeypatch) -> None:
+    frame = pd.DataFrame(
+        {
+            "Predicted cluster": ["C00", "C00", "C01"],
+            "Cluster center model": ["center-a", "center-a", "center-b"],
+        }
+    )
+    rendered: list[str] = []
+
+    monkeypatch.setattr(
+        ablation_app.st,
+        "markdown",
+        lambda body, **_: rendered.append(str(body)),
+    )
+
+    ablation_app._render_color_legend(frame, "Predicted cluster")
+
+    assert rendered
+    assert "center-a (2)" in rendered[0]
+    assert "center-b (1)" in rendered[0]
+    assert "C00" not in rendered[0]
+
+
+def test_high_cardinality_color_legend_is_a_compact_data_sized_preview(
+    monkeypatch,
+) -> None:
+    frame = pd.DataFrame({"Category": [f"category-{index}" for index in range(64)]})
+    rendered: list[str] = []
+    monkeypatch.setattr(
+        ablation_app.st,
+        "markdown",
+        lambda body, **_: rendered.append(str(body)),
+    )
+
+    ablation_app._render_color_legend(frame, "Category")
+
+    assert rendered
+    assert "+58 more" in rendered[0]
+
+
+def test_dashboard_chrome_keeps_metric_cards_compact_on_mobile(monkeypatch) -> None:
+    rendered: list[str] = []
+    monkeypatch.setattr(
+        ablation_app.st,
+        "markdown",
+        lambda body, **_: rendered.append(str(body)),
+    )
+
+    ablation_app._render_dashboard_chrome()
+
+    css = rendered[0]
+    assert "@media (max-width: 700px)" in css
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in css
+    assert '[data-testid="stMetricDelta"] p' in css
+    assert "white-space: normal !important" in css
+    assert "text-overflow: clip !important" in css
+    assert '[data-testid="stMetricDelta"] svg' in css
+    assert "display: none" in css
+
+
+def test_dashboard_chrome_uses_the_active_streamlit_theme(monkeypatch) -> None:
+    rendered: list[str] = []
+    monkeypatch.setattr(ablation_app, "_is_dark_theme", lambda: True)
+    monkeypatch.setattr(
+        ablation_app.st,
+        "markdown",
+        lambda body, **_: rendered.append(str(body)),
+    )
+
+    ablation_app._render_dashboard_chrome()
+
+    base_css = rendered[0].split("@media (prefers-color-scheme: dark)", maxsplit=1)[0]
+    assert "background: #020617" in base_css
+    assert "background: #0F172A" in base_css
+    assert "color: #F8FAFC" in base_css
 
 
 def test_target_options_fall_back_to_inferred_metadata_targets():
