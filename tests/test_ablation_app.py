@@ -565,6 +565,14 @@ def test_chart_theme_tokens_cover_dark_mode_readability():
     assert dark["hover_bg"] != light["hover_bg"]
 
 
+def test_dark_theme_uses_the_active_client_theme(monkeypatch):
+    context = type("Context", (), {"theme": type("Theme", (), {"type": "dark"})()})()
+    monkeypatch.setattr(ablation_app.st, "context", context)
+    monkeypatch.setattr(ablation_app.st, "get_option", lambda _: "light")
+
+    assert ablation_app._is_dark_theme() is True
+
+
 def test_dashboard_theme_tokens_are_professional_and_mode_specific():
     light = _dashboard_theme_tokens(dark=False)
     dark = _dashboard_theme_tokens(dark=True)
@@ -890,9 +898,8 @@ def test_dashboard_chrome_keeps_metric_cards_compact_on_mobile(monkeypatch) -> N
     assert "display: none" in css
 
 
-def test_dashboard_chrome_uses_the_active_streamlit_theme(monkeypatch) -> None:
+def test_dashboard_chrome_leaves_theme_colors_to_streamlit(monkeypatch) -> None:
     rendered: list[str] = []
-    monkeypatch.setattr(ablation_app, "_is_dark_theme", lambda: True)
     monkeypatch.setattr(
         ablation_app.st,
         "markdown",
@@ -902,9 +909,11 @@ def test_dashboard_chrome_uses_the_active_streamlit_theme(monkeypatch) -> None:
     ablation_app._render_dashboard_chrome()
 
     base_css = rendered[0].split("@media (prefers-color-scheme: dark)", maxsplit=1)[0]
-    assert "background: #020617" in base_css
-    assert "background: #0F172A" in base_css
-    assert "color: #F8FAFC" in base_css
+    assert ".stApp {" not in base_css
+    assert '[data-testid="stSidebar"] {' not in base_css
+    assert "background: #0F172A" not in base_css
+    assert "color: #F8FAFC" not in base_css
+    assert "prefers-color-scheme" not in rendered[0]
 
 
 def test_target_options_fall_back_to_inferred_metadata_targets():

@@ -68,6 +68,12 @@ def _plot_config(*, scroll_zoom: bool = False) -> dict[str, object]:
 
 def _is_dark_theme() -> bool:
     try:
+        active_theme = st.context.theme.type
+        if active_theme in {"dark", "light"}:
+            return active_theme == "dark"
+    except Exception:
+        pass
+    try:
         return st.get_option("theme.base") == "dark"
     except Exception:
         return False
@@ -166,15 +172,10 @@ def _prediction_hover_template() -> str:
 
 
 def _render_dashboard_chrome() -> None:
-    base = _dashboard_theme_tokens()
-    dark = _dashboard_theme_tokens(dark=True)
+    base = _dashboard_theme_tokens(dark=False)
     st.markdown(
         f"""
         <style>
-        .stApp {{
-            background: {base["app_bg"]};
-            color: {base["text"]};
-        }}
         .block-container {{
             padding-top: 1.0rem;
             padding-bottom: 1.55rem;
@@ -190,26 +191,28 @@ def _render_dashboard_chrome() -> None:
             letter-spacing: 0;
         }}
         [data-testid="stMetric"] {{
-            border: 1px solid {base["border"]};
+            border: 1px solid rgba(128,128,128,0.24);
             border-radius: {base["radius"]};
             padding: 0.58rem 0.70rem;
-            background: {base["surface_bg"]};
-            box-shadow: {base["shadow"]};
+            background: transparent;
+            box-shadow: 0 8px 22px rgba(0,0,0,0.06);
         }}
         [data-testid="stMetricLabel"] {{
             font-size: 0.74rem;
-            color: {base["muted"]};
+            color: inherit;
+            opacity: 0.72;
             font-weight: 560;
         }}
         [data-testid="stMetricValue"] {{
             font-size: 1.13rem;
             font-weight: 650;
-            color: {base["text"]};
+            color: inherit;
         }}
         [data-testid="stMetricDelta"] {{
             font-size: 0.72rem;
             line-height: 1.18;
-            color: {base["muted"]};
+            color: inherit;
+            opacity: 0.72;
             align-items: flex-start;
         }}
         [data-testid="stMetricDelta"] p {{
@@ -220,10 +223,6 @@ def _render_dashboard_chrome() -> None:
         [data-testid="stMetricDelta"] svg {{
             display: none;
         }}
-        [data-testid="stSidebar"] {{
-            background: {base["surface_bg"]};
-            border-right: 1px solid {base["border"]};
-        }}
         [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{
             gap: 0.48rem;
         }}
@@ -231,16 +230,16 @@ def _render_dashboard_chrome() -> None:
             font-size: 0.86rem;
             font-weight: 680;
             margin-top: 0.65rem;
-            color: {base["text"]};
+            color: inherit;
         }}
         div[role="radiogroup"] {{
             gap: 0.35rem;
         }}
         div[role="radiogroup"] label {{
-            border: 1px solid {base["border"]};
+            border: 1px solid rgba(128,128,128,0.24);
             border-radius: {base["radius"]};
             padding: 0.25rem 0.50rem;
-            background: {base["surface_bg"]};
+            background: transparent;
         }}
         div[role="radiogroup"] label:hover {{
             border-color: {base["accent"]};
@@ -250,10 +249,10 @@ def _render_dashboard_chrome() -> None:
             border-radius: {base["radius"]};
         }}
         .stPlotlyChart {{
-            border: 1px solid {base["border"]};
+            border: 1px solid rgba(128,128,128,0.24);
             border-radius: {base["radius"]};
-            background: {base["surface_bg"]};
-            box-shadow: {base["shadow"]};
+            background: transparent;
+            box-shadow: 0 8px 22px rgba(0,0,0,0.06);
             padding: 0.2rem;
         }}
         @media (max-width: 700px) {{
@@ -270,46 +269,6 @@ def _render_dashboard_chrome() -> None:
             }}
             [data-testid="stMetric"] {{
                 min-height: 4.55rem;
-            }}
-        }}
-        @media (prefers-color-scheme: dark) {{
-            .stApp {{
-                background: {dark["app_bg"]};
-                color: {dark["text"]};
-            }}
-            [data-testid="stMetric"] {{
-                border-color: {dark["border"]};
-                background: {dark["surface_bg"]};
-                box-shadow: {dark["shadow"]};
-            }}
-            [data-testid="stMetricLabel"] {{
-                color: {dark["muted"]};
-            }}
-            [data-testid="stMetricValue"] {{
-                color: {dark["text"]};
-            }}
-            [data-testid="stMetricDelta"] {{
-                color: {dark["muted"]};
-            }}
-            [data-testid="stSidebar"] {{
-                background: {dark["surface_bg"]};
-                border-right-color: {dark["border"]};
-            }}
-            [data-testid="stSidebar"] h3 {{
-                color: {dark["text"]};
-            }}
-            div[role="radiogroup"] label {{
-                border-color: {dark["border"]};
-                background: {dark["surface_bg"]};
-            }}
-            div[role="radiogroup"] label:hover {{
-                border-color: {dark["accent"]};
-                background: {dark["accent_soft"]};
-            }}
-            .stPlotlyChart {{
-                border-color: {dark["border"]};
-                background: {dark["surface_bg"]};
-                box-shadow: {dark["shadow"]};
             }}
         }}
         </style>
