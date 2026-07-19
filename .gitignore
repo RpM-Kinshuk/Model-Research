@@ -209,6 +209,9 @@ __marimo__/
 # Local git worktrees
 .worktrees/
 
+# Content-addressed study outputs and persistent local caches
+research_runs/
+
 # Nested operational repo
 Model-Zoo/
 

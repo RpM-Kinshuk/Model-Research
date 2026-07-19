@@ -716,6 +716,229 @@ def evaluate_grouped_ridge(
     return predictions, pd.DataFrame(metric_rows), audit
 
 
+def repeated_group_holdout_folds(
+    frame: pd.DataFrame,
+    *,
+    repeats: int,
+    test_fraction: float,
+    random_state: int,
+    group_column: str = "ancestry_component",
+) -> list[GroupedFold]:
+    """Draw deterministic repeated holdouts over complete ancestry components."""
+
+    if repeats <= 0:
+        raise ValueError("repeats must be positive")
+    if not np.isfinite(test_fraction) or not 0.0 < test_fraction < 1.0:
+        raise ValueError("test_fraction must be finite and in (0, 1)")
+    if group_column not in frame.columns:
+        raise KeyError(f"Missing group column: {group_column}")
+    groups = frame[group_column].map(_clean_identifier)
+    if groups.eq("").any():
+        raise ValueError("Grouped holdouts require a component for every row")
+    unique_groups = np.asarray(sorted(groups.unique()), dtype=object)
+    if len(unique_groups) < 2:
+        raise ValueError("At least two ancestry components are required")
+    test_group_count = int(np.ceil(len(unique_groups) * float(test_fraction)))
+    test_group_count = min(len(unique_groups) - 1, max(1, test_group_count))
+
+    rng = np.random.default_rng(random_state)
+    all_indices = np.arange(len(frame), dtype=int)
+    folds: list[GroupedFold] = []
+    for repeat in range(repeats):
+        held_groups = unique_groups[rng.permutation(len(unique_groups))[:test_group_count]]
+        test_mask = groups.isin(held_groups).to_numpy()
+        folds.append(
+            GroupedFold(
+                fold_id=repeat,
+                train_indices=all_indices[~test_mask],
+                test_indices=all_indices[test_mask],
+            )
+        )
+    return folds
+
+
+def evaluate_repeated_group_holdout(
+    frame: pd.DataFrame,
+    *,
+    target: str,
+    repeats: int,
+    test_fraction: float,
+    group_column: str = "ancestry_component",
+    inner_splits: int = 4,
+    ridge_alphas: Sequence[float] = (0.01, 0.1, 1.0, 10.0, 100.0),
+    bootstrap_replicates: int = 2_000,
+    random_state: int = 7,
+    minimum_components: int = 10,
+) -> tuple[pd.DataFrame, dict[str, object], list[dict[str, object]]]:
+    """Compare M+S and M+S+H over repeated component-disjoint holdouts."""
+
+    if bootstrap_replicates <= 0:
+        raise ValueError("bootstrap_replicates must be positive")
+    population, _ = confirmatory_group_population(frame, group_column=group_column)
+    population[target] = pd.to_numeric(population[target], errors="coerce")
+    population = population.loc[np.isfinite(population[target])].reset_index(drop=True)
+    if population["model_id"].astype(str).duplicated().any():
+        raise ValueError("Prediction population contains duplicate model_id values")
+    blocks = _feature_blocks(population)
+    selected_blocks = {name: blocks[name] for name in ("M+S", "M+S+H")}
+    folds = repeated_group_holdout_folds(
+        population,
+        repeats=repeats,
+        test_fraction=test_fraction,
+        random_state=random_state,
+        group_column=group_column,
+    )
+
+    rows: list[dict[str, object]] = []
+    audit: list[dict[str, object]] = []
+    for fold in folds:
+        train = population.iloc[fold.train_indices].reset_index(drop=True)
+        test = population.iloc[fold.test_indices].reset_index(drop=True)
+        train_groups = train[group_column].astype(str).to_numpy()
+        test_groups = test[group_column].astype(str).to_numpy()
+        if len(set(train_groups)) < inner_splits:
+            raise ValueError(
+                "Repeated holdout training split has fewer ancestry components "
+                "than inner folds"
+            )
+        audit.append(
+            {
+                "repeat": fold.fold_id,
+                "outer_fold": fold.fold_id,
+                "train_groups": sorted(set(train_groups)),
+                "test_groups": sorted(set(test_groups)),
+                "n_train": len(train),
+                "n_test": len(test),
+            }
+        )
+        for block_name, columns in selected_blocks.items():
+            chosen_alpha = _select_alpha(
+                train,
+                target=target,
+                feature_columns=columns,
+                group_column=group_column,
+                inner_splits=inner_splits,
+                ridge_alphas=ridge_alphas,
+                random_state=random_state + fold.fold_id,
+            )
+            pipeline = build_ridge_pipeline(alpha=chosen_alpha)
+            _fit_weighted_pipeline(
+                pipeline,
+                train.loc[:, columns].to_numpy(dtype=float),
+                train[target].to_numpy(dtype=float),
+                component_sample_weights(train_groups),
+            )
+            predicted = pipeline.predict(test.loc[:, columns].to_numpy(dtype=float))
+            for position, (_, row) in enumerate(test.iterrows()):
+                rows.append(
+                    {
+                        "repeat": fold.fold_id,
+                        "model_id": str(row["model_id"]),
+                        group_column: str(row[group_column]),
+                        "target": target,
+                        "feature_block": block_name,
+                        "outer_fold": fold.fold_id,
+                        "chosen_alpha": chosen_alpha,
+                        "actual": float(row[target]),
+                        "prediction": float(predicted[position]),
+                    }
+                )
+
+    predictions = pd.DataFrame(rows)
+    keys = ["repeat", "model_id", group_column, "target"]
+    baseline = predictions.loc[
+        predictions["feature_block"].eq("M+S"),
+        keys + ["actual", "prediction"],
+    ]
+    htsr = predictions.loc[
+        predictions["feature_block"].eq("M+S+H"),
+        keys + ["actual", "prediction"],
+    ]
+    paired = baseline.merge(
+        htsr,
+        on=keys,
+        suffixes=("_baseline", "_htsr"),
+        validate="one_to_one",
+    )
+    if len(paired) != len(baseline) or len(paired) != len(htsr):
+        raise ValueError("Repeated holdout methods must have identical test rows")
+    if not np.allclose(
+        paired["actual_baseline"], paired["actual_htsr"], rtol=0.0, atol=1e-12
+    ):
+        raise ValueError("Repeated holdout methods must share identical targets")
+    paired["baseline_error"] = (
+        paired["actual_baseline"] - paired["prediction_baseline"]
+    ).abs()
+    paired["htsr_error"] = (
+        paired["actual_htsr"] - paired["prediction_htsr"]
+    ).abs()
+    paired["delta"] = paired["htsr_error"] - paired["baseline_error"]
+
+    component_errors = paired.groupby(group_column, sort=False)[
+        ["baseline_error", "htsr_error", "delta"]
+    ].mean()
+    component_delta = component_errors["delta"].to_numpy(dtype=float)
+    inferential = len(component_delta) >= minimum_components
+    if inferential:
+        rng = np.random.default_rng(random_state)
+        samples = rng.choice(
+            component_delta,
+            size=(bootstrap_replicates, len(component_delta)),
+            replace=True,
+        ).mean(axis=1)
+        ci_low = float(np.quantile(samples, 0.025))
+        ci_high = float(np.quantile(samples, 0.975))
+    else:
+        ci_low = float("nan")
+        ci_high = float("nan")
+
+    repeat_metrics: list[dict[str, object]] = []
+    for repeat, repeat_rows in paired.groupby("repeat", sort=True):
+        repeat_components = repeat_rows.groupby(group_column)[
+            ["baseline_error", "htsr_error"]
+        ].mean()
+        baseline_mae = float(repeat_components["baseline_error"].mean())
+        htsr_mae = float(repeat_components["htsr_error"].mean())
+        repeat_metrics.append(
+            {
+                "repeat": int(repeat),
+                "n_models": int(repeat_rows["model_id"].nunique()),
+                "n_components": int(len(repeat_components)),
+                "baseline_group_weighted_mae": baseline_mae,
+                "group_weighted_mae": htsr_mae,
+                "htsr_delta_mae": htsr_mae - baseline_mae,
+            }
+        )
+    repeat_deltas = np.asarray(
+        [row["htsr_delta_mae"] for row in repeat_metrics], dtype=float
+    )
+    test_coverage = paired.groupby(group_column)["repeat"].nunique()
+    summary: dict[str, object] = {
+        "status": "development_sensitivity",
+        "evidence_role": "repeated_internal_group_holdout",
+        "n_repeats": int(repeats),
+        "test_fraction": float(test_fraction),
+        "n_models": int(paired["model_id"].nunique()),
+        "n_components": int(len(component_errors)),
+        "component_coverage_fraction": float(
+            len(component_errors) / population[group_column].nunique()
+        ),
+        "min_component_test_repeats": int(test_coverage.min()),
+        "max_component_test_repeats": int(test_coverage.max()),
+        "baseline_group_weighted_mae": float(
+            component_errors["baseline_error"].mean()
+        ),
+        "group_weighted_mae": float(component_errors["htsr_error"].mean()),
+        "htsr_delta_mae": float(component_delta.mean()),
+        "ci_low": ci_low,
+        "ci_high": ci_high,
+        "inferential": bool(inferential),
+        "fraction_repeats_htsr_better": float(np.mean(repeat_deltas < 0.0)),
+        "repeat_metrics": repeat_metrics,
+    }
+    return predictions, summary, audit
+
+
 @dataclass
 class FittedRidge:
     feature_block: str

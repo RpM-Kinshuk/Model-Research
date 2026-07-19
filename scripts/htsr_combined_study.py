@@ -30,6 +30,8 @@ _SETTING_OVERRIDES = (
     ("min_pair_coverage", "--min-pair-coverage"),
     ("min_role_coverage", "--min-role-coverage"),
     ("cluster_count_rule", "--cluster-count-rule"),
+    ("holdout_repeats", "--holdout-repeats"),
+    ("holdout_test_fraction", "--holdout-test-fraction"),
 )
 
 
@@ -66,6 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-pair-coverage", type=float, help=argparse.SUPPRESS)
     parser.add_argument("--min-role-coverage", type=float, help=argparse.SUPPRESS)
     parser.add_argument("--cluster-count-rule", help=argparse.SUPPRESS)
+    parser.add_argument("--holdout-repeats", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--holdout-test-fraction", type=float, help=argparse.SUPPRESS)
     parser.add_argument("--dry-run", action="store_true")
     return parser
 

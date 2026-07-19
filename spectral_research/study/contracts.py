@@ -105,6 +105,8 @@ class RunSettings:
     min_role_coverage: float = 0.8
     cluster_count_rule: str = "sqrt_half"
     external_evidence_role: str = "confirmatory_locked"
+    holdout_repeats: int = 0
+    holdout_test_fraction: float = 0.3
 
     def __post_init__(self) -> None:
         if not isinstance(self.schema_version, str) or not self.schema_version.strip():
@@ -117,6 +119,7 @@ class RunSettings:
             "inner_folds",
             "minimum_components",
             "minimum_lineage_families",
+            "holdout_repeats",
         ):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, Integral):
@@ -136,6 +139,8 @@ class RunSettings:
             raise ValueError("minimum_components must be at least two")
         if self.minimum_lineage_families < 2:
             raise ValueError("minimum_lineage_families must be at least two")
+        if self.holdout_repeats < 0:
+            raise ValueError("holdout_repeats must be non-negative")
 
         for field_name in (
             "min_feature_coverage",
@@ -159,6 +164,16 @@ class RunSettings:
                 "external_evidence_role must be 'confirmatory_locked' or "
                 "'reused_descriptive'"
             )
+        if (
+            isinstance(self.holdout_test_fraction, bool)
+            or not isinstance(self.holdout_test_fraction, Real)
+            or not math.isfinite(float(self.holdout_test_fraction))
+            or not 0.0 < float(self.holdout_test_fraction) < 1.0
+        ):
+            raise ValueError("holdout_test_fraction must be finite and in (0, 1)")
+        object.__setattr__(
+            self, "holdout_test_fraction", float(self.holdout_test_fraction)
+        )
 
         alphas = tuple(self.ridge_alphas)
         if not alphas:
@@ -181,6 +196,9 @@ class RunSettings:
 
         serialized = asdict(self)
         serialized["ridge_alphas"] = list(self.ridge_alphas)
+        if self.holdout_repeats == 0:
+            serialized.pop("holdout_repeats")
+            serialized.pop("holdout_test_fraction")
         return serialized
 
     def serialized(self) -> dict[str, Any]:

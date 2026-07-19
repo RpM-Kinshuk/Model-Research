@@ -4,7 +4,6 @@ import colorsys
 import hashlib
 import html
 import json
-import os
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +16,12 @@ from alpha_cluster_dashboard.dashboard_cache import (
     DashboardCache,
     infer_prediction_targets,
     recommended_cluster_count,
+)
+from alpha_cluster_dashboard.paths import default_scaleup_run, default_study_run
+from alpha_cluster_dashboard.scaleup_outputs import (
+    REQUIRED_SCALEUP_FILES,
+    ScaleupOutputs,
+    load_scaleup_outputs,
 )
 from alpha_cluster_dashboard.study_outputs import (
     REQUIRED_STUDY_FILES,
@@ -382,9 +387,20 @@ def _panel_options() -> list[str]:
 
 
 def _frozen_run_state_token(run_path: str | Path) -> str:
+    return _run_state_token(run_path, REQUIRED_STUDY_FILES)
+
+
+def _scaleup_run_state_token(run_path: str | Path) -> str:
+    return _run_state_token(run_path, REQUIRED_SCALEUP_FILES)
+
+
+def _run_state_token(
+    run_path: str | Path,
+    required_files: tuple[str, ...],
+) -> str:
     root = Path(run_path).expanduser().resolve()
     state: list[tuple[str, int | None, int | None, int | None]] = []
-    for name in REQUIRED_STUDY_FILES:
+    for name in required_files:
         try:
             metadata = (root / name).stat()
             state.append(
@@ -414,6 +430,12 @@ def _frozen_run_state_token(run_path: str | Path) -> str:
 def _cached_study_outputs(run_path: str, run_state_token: str) -> StudyOutputs:
     del run_state_token
     return load_study_outputs(run_path)
+
+
+@st.cache_data(show_spinner=False, persist="disk")
+def _cached_scaleup_outputs(run_path: str, run_state_token: str) -> ScaleupOutputs:
+    del run_state_token
+    return load_scaleup_outputs(run_path)
 
 
 def _development_oof_predictions(outputs: StudyOutputs) -> dict[str, pd.DataFrame]:
@@ -586,7 +608,117 @@ def _dashboard_cache_from_study(outputs: StudyOutputs) -> DashboardCache:
     )
 
 
-def _study_summary_cards(outputs: StudyOutputs) -> list[dict[str, str]]:
+def _dashboard_cache_from_scaleup(
+    outputs: StudyOutputs,
+    scaleup: ScaleupOutputs,
+) -> DashboardCache:
+    """Overlay a validated retained run with read-only scale-up results."""
+
+    metadata = scaleup.population.copy().reset_index(drop=True)
+    base = outputs.atlas.copy()
+    extra_columns = [
+        column
+        for column in base.columns
+        if column == "model_id" or column not in metadata.columns
+    ]
+    metadata = metadata.merge(
+        base.loc[:, extra_columns],
+        on="model_id",
+        how="left",
+        validate="one_to_one",
+    )
+    metadata["display_name"] = metadata["model_id"].astype(str)
+    metadata["cluster"] = pd.to_numeric(
+        metadata["strict_cluster"], errors="coerce"
+    ).astype("Int64")
+    predicted_family = metadata.get(
+        "predicted_family", pd.Series(pd.NA, index=metadata.index)
+    )
+    audited_family = metadata.get(
+        "audited_base_family", pd.Series(pd.NA, index=metadata.index)
+    )
+    metadata["coarse_family"] = predicted_family.fillna(audited_family).fillna(
+        "unknown"
+    )
+    metadata["Predicted family"] = predicted_family.fillna("unavailable").astype(str)
+    if "lineage_evidence_status" in metadata.columns:
+        metadata["Lineage evidence"] = (
+            metadata["lineage_evidence_status"]
+            .astype("string")
+            .str.replace("_", " ", regex=False)
+            .fillna("unavailable")
+        )
+
+    predictions = {
+        target: table.copy().reset_index(drop=True)
+        for target, table in scaleup.predictions.items()
+    }
+    for target, table in predictions.items():
+        indexed = table.set_index("display_name")
+        metadata[target] = metadata["display_name"].map(indexed["actual"])
+        metadata[f"{target} prediction"] = metadata["display_name"].map(
+            indexed["prediction"]
+        )
+        metadata[f"{target} absolute_error"] = metadata["display_name"].map(
+            indexed["absolute_error"]
+        )
+
+    return DashboardCache(
+        cache_dir=scaleup.run_dir,
+        metadata=metadata,
+        features=np.empty((len(metadata), 0), dtype=float),
+        feature_names=[],
+        predictions=predictions,
+        cluster_profiles=_frozen_cluster_profiles(metadata),
+        cluster_summary=_frozen_cluster_summary(metadata),
+        manifest={
+            "provenance": dict(scaleup.metadata),
+            "summary": dict(scaleup.counts),
+            "base_run": str(outputs.run_dir),
+        },
+    )
+
+
+def _study_summary_cards(
+    outputs: StudyOutputs,
+    scaleup: ScaleupOutputs | None = None,
+) -> list[dict[str, str]]:
+    if scaleup is not None:
+        modern = scaleup.performance.get("modern_average", {})
+        legacy = scaleup.performance.get("legacy_average", {})
+
+        def count(key: str) -> str:
+            value = scaleup.counts.get(key)
+            return f"{int(value):,}" if value is not None else "n/a"
+
+        modern_models = modern.get("n_models")
+        modern_components = modern.get("n_components")
+        modern_scope = (
+            f"{int(modern_models):,} / {int(modern_components):,}"
+            if modern_models is not None and modern_components is not None
+            else "internal grouped"
+        )
+        return [
+            {"label": "Census models", "value": count("phase2_census")},
+            {"label": "HTSR artifacts", "value": count("phase2_htsr_artifacts")},
+            {"label": "Strict clustered", "value": count("phase2_strict_lineage")},
+            {
+                "label": "Modern MAE",
+                "value": _format_number(modern.get("group_weighted_mae")),
+                "delta": modern_scope,
+            },
+            {
+                "label": "Modern dMAE",
+                "value": _format_number(modern.get("delta_mae")),
+                "delta": "direct alpha vs M+S+H",
+            },
+            {
+                "label": "Legacy dMAE",
+                "value": _format_number(legacy.get("delta_mae")),
+                "delta": "direct alpha vs M+S+H",
+            },
+        ]
+
     lineage = outputs.lineage_summary
     performance = outputs.performance_summary
     family_count = lineage.get("n_families")
@@ -1943,6 +2075,22 @@ def _performance_target_values(outputs: StudyOutputs, target: str) -> dict[str, 
     return values
 
 
+def _scaleup_performance_target_values(
+    scaleup: ScaleupOutputs,
+    target: str,
+) -> dict[str, float | None]:
+    record = scaleup.performance.get(target, {})
+    return {
+        "group_weighted_mae": _finite_number(record.get("group_weighted_mae")),
+        "spearman": _finite_number(record.get("spearman")),
+        "htsr_delta_mae": _finite_number(record.get("delta_mae")),
+        "htsr_ci_low": _finite_number(record.get("ci_low")),
+        "htsr_ci_high": _finite_number(record.get("ci_high")),
+        "n_models": _finite_number(record.get("n_models")),
+        "n_components": _finite_number(record.get("n_components")),
+    }
+
+
 def _external_status_for_target(outputs: StudyOutputs, target: str) -> str:
     evaluated_target = outputs.performance_summary.get("external_target")
     if evaluated_target is None or str(evaluated_target) != str(target):
@@ -1952,10 +2100,23 @@ def _external_status_for_target(outputs: StudyOutputs, target: str) -> str:
     return str(outputs.external_status).replace("_", " ").title()
 
 
-def _render_frozen_prediction(outputs: StudyOutputs, cache: DashboardCache, target: str) -> None:
-    run_id = str(outputs.provenance.get("run_id", outputs.run_dir.name))
+def _render_frozen_prediction(
+    outputs: StudyOutputs,
+    cache: DashboardCache,
+    target: str,
+    scaleup: ScaleupOutputs | None = None,
+) -> None:
+    run_id = str(
+        scaleup.metadata.get("run_id", scaleup.run_dir.name)
+        if scaleup is not None
+        else outputs.provenance.get("run_id", outputs.run_dir.name)
+    )
     predictions = cache.predictions.get(target, pd.DataFrame())
-    values = _performance_target_values(outputs, target)
+    values = (
+        _scaleup_performance_target_values(scaleup, target)
+        if scaleup is not None
+        else _performance_target_values(outputs, target)
+    )
     interval = (
         f"[{_format_number(values['htsr_ci_low'])}, {_format_number(values['htsr_ci_high'])}]"
         if values["htsr_ci_low"] is not None and values["htsr_ci_high"] is not None
@@ -1967,12 +2128,12 @@ def _render_frozen_prediction(outputs: StudyOutputs, cache: DashboardCache, targ
         if values["n_components"] is not None
         else "n/a"
     )
-    primary_status = (
+    primary_status = "direct alpha vs M+S+H" if scaleup is not None else (
         "claim passed"
         if outputs.performance_summary.get("primary_passed") is True
         else "claim failed"
     )
-    if target != "modern_average":
+    if target != "modern_average" and scaleup is None:
         primary_status = "descriptive"
     _render_cards(
         [
@@ -1983,18 +2144,31 @@ def _render_frozen_prediction(outputs: StudyOutputs, cache: DashboardCache, targ
             {"label": "Grouped MAE", "value": _format_number(values["group_weighted_mae"])},
             {"label": "Model Spearman", "value": _format_number(values["spearman"])},
             {
-                "label": "HTSR dMAE",
+                "label": "dMAE vs baseline" if scaleup is not None else "HTSR dMAE",
                 "value": _format_number(values["htsr_delta_mae"]),
                 "delta": primary_status,
             },
             {"label": "95% interval", "value": interval},
-            {"label": "External", "value": _external_status_for_target(outputs, target)},
+            {
+                "label": "Evidence",
+                "value": (
+                    "Internal grouped"
+                    if scaleup is not None
+                    else _external_status_for_target(outputs, target)
+                ),
+            },
         ]
     )
-    st.caption(
-        "Frozen development out-of-fold M+S+H predictions. MAE is component "
-        "weighted; Spearman is model-level descriptive."
-    )
+    if scaleup is not None:
+        st.caption(
+            "Scale-up out-of-fold direct alpha-profile predictions. MAE is ancestry-component "
+            "weighted; Spearman is model-level descriptive."
+        )
+    else:
+        st.caption(
+            "Frozen development out-of-fold M+S+H predictions. MAE is component "
+            "weighted; Spearman is model-level descriptive."
+        )
     labeled = _labeled_prediction_rows(predictions)
     if labeled.empty:
         st.info("No finite frozen development predictions are available for this target.")
@@ -2012,7 +2186,7 @@ def _render_frozen_prediction(outputs: StudyOutputs, cache: DashboardCache, targ
         color="absolute_error",
         custom_data=["hover_model", "actual", "prediction", "absolute_error"],
         color_continuous_scale=_prediction_error_color_scale(dark=dark),
-        title=f"{target}: frozen OOF prediction",
+        title=f"{target}: out-of-fold prediction",
         render_mode="webgl",
     )
     lower = float(np.nanmin([plot_frame["actual"].min(), plot_frame["prediction"].min()]))
@@ -2044,7 +2218,7 @@ def _render_frozen_prediction(outputs: StudyOutputs, cache: DashboardCache, targ
         plot_frame,
         x="absolute_error",
         nbins=40,
-        title="Frozen absolute-error distribution",
+        title="Absolute-error distribution",
     )
     histogram.update_layout(height=SECONDARY_PLOT_HEIGHT, showlegend=False)
     _apply_analytics_style(histogram)
@@ -2113,10 +2287,18 @@ def _render_frozen_lineage(
     if lineage.empty:
         st.info("No frozen clustered models match the current filters.")
         return
-    st.caption(
-        f"{len(lineage):,} clustered models shown; family predictions are available "
-        "only for eligible audited queries."
-    )
+    if "family_prediction_scope" in lineage.columns and lineage[
+        "family_prediction_scope"
+    ].notna().any():
+        st.caption(
+            f"{len(lineage):,} strict-QC clustered models shown. Full-gallery family "
+            "routes are descriptive manual-triage suggestions, not ancestry labels."
+        )
+    else:
+        st.caption(
+            f"{len(lineage):,} clustered models shown; family predictions are available "
+            "only for eligible audited queries."
+        )
     _plotly_chart(
         _plot_galaxy(
             lineage,
@@ -2138,7 +2320,10 @@ def _render_frozen_lineage(
     )
 
 
-def _render_frozen_evidence(outputs: StudyOutputs) -> None:
+def _render_frozen_evidence(
+    outputs: StudyOutputs,
+    scaleup: ScaleupOutputs | None = None,
+) -> None:
     provenance_values = []
     if "estimator_provenance" in outputs.lineage_predictions.columns:
         provenance_values = sorted(
@@ -2175,52 +2360,103 @@ def _render_frozen_evidence(outputs: StudyOutputs) -> None:
             st.markdown(report_path.read_text(encoding="utf-8"))
         except OSError as error:
             st.error(f"The frozen report is unavailable: {error}")
+    if scaleup is not None:
+        with st.expander("Scale-up report", expanded=True):
+            st.markdown(scaleup.report)
+        with st.expander("Scale-up metadata"):
+            st.json(dict(scaleup.metadata))
+        with st.expander("Broad-lineage sensitivity"):
+            st.dataframe(
+                scaleup.broad_cluster_metrics,
+                width="stretch",
+                hide_index=True,
+            )
 
 
-def render_ablation_atlas(run_path: str | Path | None = None) -> None:
+def render_ablation_atlas(
+    run_path: str | Path | None = None,
+    scaleup_path: str | Path | None = None,
+) -> None:
     _render_dashboard_chrome()
     st.title("Spectral Atlas")
-    st.caption("Read-only lineage and performance evidence from one explicit frozen study run.")
+    st.caption("Read-only lineage and performance evidence from retained study artifacts.")
 
-    configured_path = str(run_path) if run_path is not None else os.environ.get("HTSR_STUDY_RUN", "")
+    discovered_study = default_study_run()
+    discovered_scaleup = default_scaleup_run()
+    configured_path = str(
+        run_path if run_path is not None else discovered_study or ""
+    )
+    configured_scaleup = str(
+        scaleup_path if scaleup_path is not None else discovered_scaleup or ""
+    )
     with st.sidebar:
-        st.subheader("Frozen run")
+        st.subheader("Data sources")
         if run_path is None:
             configured_path = st.text_input(
-                "Run directory",
+                "Retained study",
                 value=configured_path,
-                placeholder="research_runs/.../<run-id>",
+                placeholder="research_runs/htsr_study/runs/<run-id>",
             ).strip()
         else:
             st.caption(configured_path)
+        if scaleup_path is None:
+            configured_scaleup = st.text_input(
+                "Scale-up study",
+                value=configured_scaleup,
+                placeholder="research_runs/htsr_scaleup/runs/<run-id>",
+                help="Optional overlay for the full census and leading alpha-profile predictions.",
+            ).strip()
+        elif configured_scaleup:
+            st.caption(configured_scaleup)
 
     if not configured_path:
         st.warning("Frozen study unavailable")
-        st.caption("Provide an explicit run directory in the sidebar or set HTSR_STUDY_RUN.")
+        st.caption("Provide a retained study directory or set HTSR_STUDY_RUN.")
         return
 
-    progress_bar = st.progress(0.0, text="0% Loading frozen study")
+    progress_bar = st.progress(0.0, text="0% Loading study")
     status = st.empty()
     try:
         progress_bar.progress(0.15, text="15% Validating run files")
         status.caption("Reading validated frozen CSV and JSON outputs.")
         run_state_token = _frozen_run_state_token(configured_path)
         outputs = _cached_study_outputs(configured_path, run_state_token)
-        progress_bar.progress(0.75, text="75% Preparing display tables")
-        status.caption("Adapting frozen tables for the 2D viewer.")
-        cache = _dashboard_cache_from_study(outputs)
-        progress_bar.progress(1.0, text="100% Frozen study loaded")
     except Exception as error:
         progress_bar.empty()
         status.empty()
         st.error("Frozen study unavailable")
         st.caption(str(error))
         return
+
+    scaleup: ScaleupOutputs | None = None
+    scaleup_error: Exception | None = None
+    if configured_scaleup:
+        try:
+            progress_bar.progress(0.55, text="55% Loading scale-up results")
+            status.caption("Reading the large-scale census and direct alpha predictions.")
+            scaleup_token = _scaleup_run_state_token(configured_scaleup)
+            scaleup = _cached_scaleup_outputs(configured_scaleup, scaleup_token)
+        except Exception as error:
+            scaleup_error = error
+
+    progress_bar.progress(0.80, text="80% Preparing display tables")
+    status.caption("Adapting retained tables for the 2D viewer.")
+    cache = (
+        _dashboard_cache_from_scaleup(outputs, scaleup)
+        if scaleup is not None
+        else _dashboard_cache_from_study(outputs)
+    )
+    progress_bar.progress(1.0, text="100% Study loaded")
     progress_bar.empty()
     status.empty()
+    if scaleup_error is not None:
+        st.warning(f"Scale-up overlay unavailable; showing the retained run only. {scaleup_error}")
 
-    _render_cards(_study_summary_cards(outputs))
-    st.caption(f"Run: {outputs.run_dir}")
+    _render_cards(_study_summary_cards(outputs, scaleup))
+    if scaleup is not None:
+        st.caption(f"Scale-up: {scaleup.run_dir} | retained base: {outputs.run_dir}")
+    else:
+        st.caption(f"Run: {outputs.run_dir}")
 
     panel = st.radio("View", options=_panel_options(), horizontal=True)
     targets = _target_options(cache)
@@ -2296,16 +2532,16 @@ def render_ablation_atlas(run_path: str | Path | None = None) -> None:
                     zoom=atlas_zoom,
                 ),
                 key=(
-                    f"htsr:{outputs.provenance.get('run_id', outputs.run_dir.name)}:atlas:galaxy"
+                    f"htsr:{cache.cache_dir.name}:atlas:galaxy"
                 ),
                 scroll_zoom=gesture_zoom,
             )
             _render_color_legend(atlas_frame, color_by)
     elif panel == "Prediction":
         if target is None:
-            st.info("No frozen development target is available.")
+            st.info("No out-of-fold performance target is available.")
         else:
-            _render_frozen_prediction(outputs, cache, target)
+            _render_frozen_prediction(outputs, cache, target, scaleup)
     elif panel == "Lineage":
         _render_frozen_lineage(
             outputs,
@@ -2325,13 +2561,13 @@ def render_ablation_atlas(run_path: str | Path | None = None) -> None:
             _render_profiles_tab(cache, int(cluster_choice))
             st.dataframe(cache.cluster_summary, width="stretch", height=SECONDARY_PLOT_HEIGHT, hide_index=True)
     elif panel == "Evidence":
-        _render_frozen_evidence(outputs)
+        _render_frozen_evidence(outputs, scaleup)
     elif panel == "Data":
-        st.caption(f"{len(filtered):,} filtered rows from {len(outputs.atlas):,} loaded atlas models.")
+        st.caption(f"{len(filtered):,} filtered rows from {len(cache.metadata):,} loaded atlas models.")
         st.dataframe(filtered, width="stretch", height=TABLE_HEIGHT, hide_index=True)
         st.download_button(
             "Download current atlas rows",
             data=filtered.to_csv(index=False).encode("utf-8"),
-            file_name="frozen_spectral_atlas_rows.csv",
+            file_name="spectral_atlas_rows.csv",
             mime="text/csv",
         )

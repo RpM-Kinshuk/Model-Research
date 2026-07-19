@@ -19,6 +19,7 @@ from alpha_cluster_dashboard.ablation_app import (
     _cluster_galaxy_layout,
     _color_options,
     _dashboard_summary_cards,
+    _dashboard_cache_from_scaleup,
     _dashboard_cache_from_study,
     _dashboard_theme_tokens,
     _display_model_name,
@@ -43,6 +44,7 @@ from alpha_cluster_dashboard.ablation_app import (
     _plot_prediction_lineage,
     _plotly_chart,
     _performance_target_values,
+    _scaleup_performance_target_values,
     _prediction_error_color_scale,
     _prediction_hover_template,
     _prediction_metric_cards,
@@ -59,6 +61,7 @@ from alpha_cluster_dashboard.ablation_app import (
     render_ablation_atlas,
 )
 from alpha_cluster_dashboard.study_outputs import StudyOutputs
+from alpha_cluster_dashboard.scaleup_outputs import ScaleupOutputs
 
 
 def _frame(rows: int) -> pd.DataFrame:
@@ -146,10 +149,67 @@ def _frozen_outputs(tmp_path: Path, rows: int = 6) -> StudyOutputs:
     )
 
 
+def _scaleup_outputs(tmp_path: Path) -> ScaleupOutputs:
+    population = pd.DataFrame(
+        {
+            "model_id": ["org/model-0", "org/model-1", "org/new-model"],
+            "htsr_artifact_available": [True, True, False],
+            "strict_cluster": pd.Series([4, 5, pd.NA], dtype="Int64"),
+            "broad_cluster": pd.Series([2, 3, pd.NA], dtype="Int64"),
+            "predicted_family": ["root/a", "root/b", pd.NA],
+            "lineage_evidence_status": [
+                "strict_qc_clustered",
+                "strict_qc_clustered",
+                "missing_htsr_artifact",
+            ],
+        }
+    )
+    predictions = pd.DataFrame(
+        {
+            "model_id": ["org/model-0", "org/model-1"],
+            "display_name": ["org/model-0", "org/model-1"],
+            "target": ["modern_average", "modern_average"],
+            "feature_block": ["alpha_profile_k5_component_distinct"] * 2,
+            "actual": [20.0, 25.0],
+            "prediction": [21.0, 24.5],
+            "absolute_error": [1.0, 0.5],
+            "nearest_neighbors": ["", ""],
+        }
+    )
+    return ScaleupOutputs(
+        run_dir=tmp_path / "scaleup_run",
+        metadata={"run_id": "scaleup_run"},
+        counts={
+            "phase2_census": 3,
+            "phase2_htsr_artifacts": 2,
+            "phase2_strict_lineage": 2,
+        },
+        population=population,
+        predictions={"modern_average": predictions},
+        performance={
+            "modern_average": {
+                "target": "modern_average",
+                "group_weighted_mae": 0.75,
+                "spearman": 1.0,
+                "delta_mae": -0.4,
+                "ci_low": -0.7,
+                "ci_high": -0.1,
+                "n_models": 2,
+                "n_components": 2,
+            }
+        },
+        broad_cluster_metrics=pd.DataFrame(),
+        report="# Scale-up\n",
+    )
+
+
 def test_live_dashboard_entrypoint_loads_frozen_outputs_without_fitting_cache() -> None:
     source = inspect.getsource(render_ablation_atlas)
 
     assert "_cached_study_outputs" in source
+    assert "default_study_run()" in source
+    assert "default_scaleup_run()" in source
+    assert "_cached_scaleup_outputs" in source
     assert "load_or_build_dashboard_cache" not in source
     assert "source_fingerprint" not in source
     assert "Rendered points" not in source
@@ -188,6 +248,34 @@ def test_frozen_study_adapter_exposes_all_rows_and_oof_predictions(tmp_path: Pat
     assert set(cache.predictions) == {"modern_average"}
     assert len(cache.predictions["modern_average"]) == 9
     assert int(cache.cluster_summary["size"].sum()) == 9
+
+
+def test_scaleup_adapter_uses_full_ledger_strict_clusters_and_alpha_predictions(
+    tmp_path: Path,
+) -> None:
+    cache = _dashboard_cache_from_scaleup(
+        _frozen_outputs(tmp_path, rows=2),
+        _scaleup_outputs(tmp_path),
+    )
+
+    assert len(cache.metadata) == 3
+    assert cache.metadata["cluster"].tolist() == [4, 5, pd.NA]
+    assert cache.metadata["broad_cluster"].tolist() == [2, 3, pd.NA]
+    assert set(cache.predictions) == {"modern_average"}
+    assert cache.metadata["modern_average"].tolist()[:2] == [20.0, 25.0]
+    assert int(cache.cluster_summary["size"].sum()) == 2
+
+
+def test_scaleup_performance_values_report_direct_alpha_result(tmp_path: Path) -> None:
+    values = _scaleup_performance_target_values(
+        _scaleup_outputs(tmp_path), "modern_average"
+    )
+
+    assert values["group_weighted_mae"] == 0.75
+    assert values["htsr_delta_mae"] == -0.4
+    assert values["htsr_ci_low"] == -0.7
+    assert values["htsr_ci_high"] == -0.1
+    assert values["n_models"] == 2
 
 
 def test_frozen_study_adapter_preserves_unassigned_clusters_as_missing(tmp_path: Path) -> None:

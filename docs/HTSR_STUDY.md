@@ -1,7 +1,8 @@
 # HTSR Lineage And Performance Study
 
-Protocol: `htsr-combined-study-v3`  
-Retained run: `research_runs/htsr_study/runs/htsr_b41e5fbcb8abcc600bce`
+Protocol: `htsr-combined-study-v4`
+
+Retained run: `research_runs/htsr_study/runs/htsr_7f739673cde388be2d4c`
 
 Local paper snapshot: `archive/reference-work/Spectral Signatures of Large Language Models.html`
 
@@ -51,15 +52,21 @@ The primary contrast is
 `Delta MAE = MAE(M+S+H) - MAE(M+S)`,
 
 with component-weighted MAE, a component bootstrap interval, and a paired sign-flip
-test. Negative values favor adding `H`.
+test. Negative values favor adding `H`. A sensitivity analysis repeats a 70/30
+ancestry-component split 20 times on the Phase-2 population, tuning only within
+each training partition and comparing both feature blocks on identical test rows.
+Repeated observations are averaged within ancestry component before bootstrapping.
 
 ## Current Evidence
 
 - Performance, 302 models in 79 ancestry components: `M` MAE 3.823, `M+S` 3.597,
   and `M+S+H` 3.468.
-- The HTSR increment was -0.129 MAE (3.59% point improvement), 95% CI
+- The HTSR increment was -0.129 MAE (3.59% relative improvement), 95% CI
   `[-0.365, 0.092]`, sign-flip `p=0.278`. The point estimate favors `H`, but the
   frozen improvement and interval criteria did not pass.
+- Across 20 ancestry-disjoint 70/30 Phase-2 holdouts, the increment shrank to
+  -0.016 MAE, 95% component-bootstrap CI `[-0.236, 0.209]`; `H` was better in
+  only 9/20 splits. This is internal robustness evidence, not an external test.
 - Observed-family routing covered 174 queries in 11 audited families.
   `spectral_shape` and `combined` both reached 0.96884 macro top-1; alpha did not
   add a measurable top-1 gain there.
@@ -72,8 +79,25 @@ test. Negative values favor adding `H`.
 
 ## Decision
 
-Use grouped `M+S` Ridge as the defensible performance baseline and retain `M+S+H`
-as the best point-estimate sensitivity until it replicates on a prospectively
-untouched source. Use `spectral_shape` as the minimal family-routing method, with
-the combined/alpha views retained for diagnostics. More model complexity is not
-the present bottleneck; independent lineage breadth and prospective evaluation are.
+The retained v4 result remains the frozen confirmatory record. The scaled study at
+`research_runs/htsr_scaleup/runs/scaleup_f500d13ec545609d70b5` adds exploratory
+evidence over the larger available populations:
+
+- Direct component-distinct alpha-profile kNN reached MAE 3.082 versus 3.455 for
+  `M+S+H` on an identical 649-model, 139-component modern population. The paired
+  improvement was 0.373 MAE, 95% CI `[0.037, 0.727]`, `p=0.037`.
+- On 348 ancestry-supported legacy models, direct alpha-profile kNN improved the
+  six-task average by 1.328 MAE, 95% CI `[0.554, 2.104]`, `p=0.0013`. Five of six
+  individual tasks survived Holm correction.
+- Nested residual correction did not reliably improve `M+S+H` on either target
+  generation. Alpha profiles work better here as a direct local predictor.
+- The 15,000-model Phase-2 ledger contains 8,892 HTSR artifacts. Keep the 7,534
+  strict-QC lineage result as the default. The 8,284-model broad clustering is a
+  coverage sensitivity and its family routes are manual-triage candidates only.
+
+Use direct alpha-profile kNN as the leading scaled performance method, while
+retaining `M+S+H` as the parametric baseline. Treat the scaled gains as internal
+grouped evidence until a genuinely prospective model collection is available.
+For lineage, keep `spectral_shape` routing and strict clustering as the primary
+views; do not convert broad clusters or inverse-distance scores into ancestry
+ground truth.

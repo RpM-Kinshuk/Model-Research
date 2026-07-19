@@ -54,6 +54,7 @@ from spectral_research.study.performance import (
     confirmatory_group_population,
     evaluate_external_transfer,
     evaluate_grouped_ridge,
+    evaluate_repeated_group_holdout,
     evaluate_secondary_endpoints,
     grouped_outer_folds,
     paired_component_bootstrap,
@@ -76,7 +77,7 @@ REQUIRED_ARTIFACTS = (
     ARTIFACT_MANIFEST_FILE,
 )
 
-STUDY_IMPLEMENTATION_VERSION = "htsr-combined-implementation-v6"
+STUDY_IMPLEMENTATION_VERSION = "htsr-combined-implementation-v7"
 
 _FEATURE_CACHE_FILES = (
     "feature_table.csv",
@@ -1053,6 +1054,7 @@ def _evaluate_performance(
     audit_frames: list[pd.DataFrame] = []
     primary_increment: dict[str, Any] | None = None
     secondary_increments = pd.DataFrame()
+    holdout_summary: dict[str, Any] = {"status": "disabled"}
     exclusions: list[pd.DataFrame] = []
 
     _, primary_infeasible = _performance_feasibility(
@@ -1095,6 +1097,49 @@ def _evaluate_performance(
                 minimum_components=settings.minimum_components,
             ),
         }
+        if settings.holdout_repeats > 0:
+            try:
+                holdout_predictions, holdout_summary, holdout_audit = (
+                    evaluate_repeated_group_holdout(
+                        development,
+                        target="modern_average",
+                        repeats=settings.holdout_repeats,
+                        test_fraction=settings.holdout_test_fraction,
+                        inner_splits=settings.inner_folds,
+                        ridge_alphas=settings.ridge_alphas,
+                        bootstrap_replicates=settings.bootstrap_replicates,
+                        random_state=settings.random_seed,
+                        minimum_components=settings.minimum_components,
+                    )
+                )
+                holdout_predictions.insert(
+                    0,
+                    "evaluation_scope",
+                    holdout_predictions["repeat"].map(
+                        lambda repeat: f"development_holdout_{int(repeat):03d}"
+                    ),
+                )
+                holdout_predictions["external_slice"] = ""
+                prediction_frames.append(holdout_predictions)
+                holdout_audit_frame = pd.DataFrame(holdout_audit)
+                holdout_audit_frame.insert(0, "target", "modern_average")
+                holdout_audit_frame.insert(
+                    0, "evaluation_scope", "development_repeated_holdout"
+                )
+                audit_frames.append(holdout_audit_frame)
+            except ValueError as error:
+                holdout_summary = {
+                    "status": "unavailable",
+                    "reason": "infeasible_repeated_group_holdout",
+                    "detail": str(error),
+                }
+                exclusions.append(
+                    _exclusion(
+                        "performance_holdout",
+                        "repeated_group_holdout_unavailable",
+                        str(error),
+                    )
+                )
         try:
             secondary = evaluate_secondary_endpoints(
                 development,
@@ -1296,6 +1341,7 @@ def _evaluate_performance(
         "primary_increment": primary_increment or {},
         "secondary_increments": _records(secondary_increments),
         "secondary_holm_adjusted_p": secondary_adjusted,
+        "repeated_group_holdout": holdout_summary,
         "external": {
             **external_status,
             "metrics": _records(external_metrics),
@@ -1389,6 +1435,7 @@ def _report(
     performance_metrics: Mapping[str, Any],
 ) -> str:
     external = performance_metrics["external"]
+    holdout = performance_metrics.get("repeated_group_holdout", {})
     decision = performance_metrics["primary_decision"]
     primary = performance_metrics.get("primary", {})
     development = performance_metrics.get("development", [])
@@ -1521,6 +1568,8 @@ def _report(
             f"- M+S MAE: {number(primary_rows.get('M+S', {}).get('group_weighted_mae'))}",
             f"- M+S+H MAE: {number(primary_rows.get('M+S+H', {}).get('group_weighted_mae'))}",
             f"- Paired H increment (positive is worse): {number(delta)} [{number(primary.get('htsr_ci_low'))}, {number(primary.get('htsr_ci_high'))}]",
+            f"- Repeated grouped holdout: {int(holdout.get('n_repeats', 0) or 0)} repeats at {number(holdout.get('test_fraction'), 2)} test fraction",
+            f"- Repeated-holdout H increment (positive is worse): {number(holdout.get('htsr_delta_mae'))} [{number(holdout.get('ci_low'))}, {number(holdout.get('ci_high'))}]",
             f"- Primary HTSR decision passed: {bool(decision.get('passed', False))}",
             f"- Decision reasons: {reasons}",
             f"- External transfer status: {external['status']}",
@@ -1535,6 +1584,7 @@ def _report(
             "- LOFO pseudo-unknown scores measure discrimination under held-out audited families; they are not a calibrated deployment rejection threshold.",
             "- Cross-fitted observed-family retrieval is known reference-library attribution, not canonical-root recovery or unseen-family generalization.",
             "- Performance intervals are conditional on the frozen grouped folds and their out-of-fold predictions.",
+            "- The repeated Phase-2 holdout is an internal development sensitivity, not an untouched external test.",
             "- Spearman, Kendall, and R2 are model-level descriptive statistics; primary MAE is component weighted.",
             f"- {external_interpretation}",
             "- Alpha uses the stored DKS estimator; this is not a fixed-Hill replication of the paper.",

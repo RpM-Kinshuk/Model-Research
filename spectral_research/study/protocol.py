@@ -9,7 +9,7 @@ from typing import Any
 from spectral_research.study.contracts import RunSettings
 
 
-_PROTOCOL_FIELDS = frozenset(
+_BASE_PROTOCOL_FIELDS = frozenset(
     {
         "protocol_version",
         "random_seed",
@@ -26,6 +26,9 @@ _PROTOCOL_FIELDS = frozenset(
         "cluster_count_rule",
         "external_evidence_role",
     }
+)
+_HOLDOUT_PROTOCOL_FIELDS = frozenset(
+    {"holdout_repeats", "holdout_test_fraction"}
 )
 
 
@@ -47,9 +50,17 @@ def load_protocol(path: str | Path) -> StudyProtocol:
     if not isinstance(payload, Mapping):
         raise ValueError("protocol JSON must contain an object")
 
+    version = payload.get("protocol_version")
+    if version == "htsr-combined-study-v3":
+        expected_fields = _BASE_PROTOCOL_FIELDS
+    elif version == "htsr-combined-study-v4":
+        expected_fields = _BASE_PROTOCOL_FIELDS | _HOLDOUT_PROTOCOL_FIELDS
+    else:
+        raise ValueError(f"unsupported protocol_version: {version!r}")
+
     actual_fields = set(payload)
-    missing = sorted(_PROTOCOL_FIELDS - actual_fields)
-    unexpected = sorted(actual_fields - _PROTOCOL_FIELDS)
+    missing = sorted(expected_fields - actual_fields)
+    unexpected = sorted(actual_fields - expected_fields)
     if missing or unexpected:
         details = []
         if missing:
@@ -60,6 +71,9 @@ def load_protocol(path: str | Path) -> StudyProtocol:
 
     values: dict[str, Any] = dict(payload)
     values["schema_version"] = values.pop("protocol_version")
+    if version == "htsr-combined-study-v3":
+        values["holdout_repeats"] = 0
+        values["holdout_test_fraction"] = 0.3
     return StudyProtocol(**values)
 
 

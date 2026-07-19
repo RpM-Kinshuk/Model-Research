@@ -17,6 +17,7 @@ from spectral_research.study.performance import (
     confirmatory_group_population,
     evaluate_external_transfer,
     evaluate_grouped_ridge,
+    evaluate_repeated_group_holdout,
     evaluate_secondary_endpoints,
     external_component_slices,
     group_weighted_mae,
@@ -463,6 +464,29 @@ def test_grouped_ridge_detects_incremental_htsr_signal() -> None:
 
     mae = metrics.set_index("feature_block")["group_weighted_mae"]
     assert mae["M+S+H"] < 0.2 * mae["M+S"]
+
+
+def test_repeated_group_holdout_is_paired_and_component_disjoint() -> None:
+    predictions, summary, audit = evaluate_repeated_group_holdout(
+        _prediction_frame(),
+        target="modern_average",
+        repeats=4,
+        test_fraction=0.25,
+        inner_splits=3,
+        ridge_alphas=(0.01, 1.0, 100.0),
+        bootstrap_replicates=100,
+        random_state=7,
+    )
+
+    assert set(predictions["feature_block"]) == {"M+S", "M+S+H"}
+    assert predictions.groupby(["repeat", "feature_block"]).size().nunique() == 1
+    assert summary["n_repeats"] == 4
+    assert summary["test_fraction"] == pytest.approx(0.25)
+    assert summary["htsr_delta_mae"] < 0.0
+    assert summary["fraction_repeats_htsr_better"] == pytest.approx(1.0)
+    for fold in audit:
+        assert len(fold["test_groups"]) == 3
+        assert set(fold["train_groups"]).isdisjoint(fold["test_groups"])
 
 
 def test_paired_component_bootstrap_resamples_components_not_rows() -> None:

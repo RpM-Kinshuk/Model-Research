@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import errno
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
@@ -267,7 +268,7 @@ def test_runner_writes_atomic_auditable_outputs_and_preserves_sources(
 
     provenance = json.loads((result.run_dir / "provenance.json").read_text())
     assert provenance["implementation_identity"]["implementation_version"] == (
-        "htsr-combined-implementation-v6"
+        "htsr-combined-implementation-v7"
     )
     assert provenance["implementation_identity"]["implementation_digest"] == (
         _study_implementation_digest()
@@ -346,6 +347,31 @@ def test_runner_writes_atomic_auditable_outputs_and_preserves_sources(
 
     for name, path in inputs.source_paths().items():
         assert (path_digest(path), path.stat().st_mtime_ns) == source_state[name]
+
+
+def test_runner_publishes_repeated_holdout_as_development_sensitivity(
+    tmp_path: Path,
+) -> None:
+    inputs = _write_synthetic_inputs(tmp_path)
+    settings = replace(
+        _settings("synthetic-study-v4"),
+        holdout_repeats=2,
+        holdout_test_fraction=0.3,
+    )
+
+    result = run_study(inputs, settings)
+
+    metrics = json.loads(
+        (result.run_dir / "performance_metrics.json").read_text(encoding="utf-8")
+    )
+    sensitivity = metrics["repeated_group_holdout"]
+    assert sensitivity["status"] == "development_sensitivity"
+    assert sensitivity["n_repeats"] == 2
+    predictions = pd.read_csv(result.run_dir / "performance_predictions.csv")
+    assert predictions["evaluation_scope"].str.startswith(
+        "development_holdout_"
+    ).any()
+    assert predictions["evaluation_scope"].eq("development").any()
 
 
 def test_runner_excludes_nonconfirmatory_schema_from_all_fitted_analyses(

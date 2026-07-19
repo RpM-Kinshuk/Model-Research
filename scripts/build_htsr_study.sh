@@ -18,5 +18,5 @@ exec "$PYTHON_BIN" scripts/htsr_combined_study.py \
   --external-targets Model-Zoo/data/ablation/ablation_selected.csv \
   --cache-root research_runs/htsr_study/cache/study_features \
   --output-root research_runs/htsr_study/runs \
-  --protocol configs/htsr_combined_study_v3.json \
+  --protocol configs/htsr_combined_study_v4.json \
   "$@"

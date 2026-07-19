@@ -12,7 +12,8 @@ from spectral_research.study.protocol import StudyProtocol, load_protocol
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-CANONICAL_PROTOCOL = REPO_ROOT / "configs" / "htsr_combined_study_v3.json"
+CANONICAL_PROTOCOL = REPO_ROOT / "configs" / "htsr_combined_study_v4.json"
+LEGACY_PROTOCOL = REPO_ROOT / "configs" / "htsr_combined_study_v3.json"
 
 
 def _required_cli_args(tmp_path: Path) -> list[str]:
@@ -41,9 +42,9 @@ def test_canonical_confirmatory_protocol_is_explicit_and_versioned() -> None:
 
     assert isinstance(protocol, StudyProtocol)
     assert isinstance(protocol, RunSettings)
-    assert protocol.protocol_version == "htsr-combined-study-v3"
+    assert protocol.protocol_version == "htsr-combined-study-v4"
     assert protocol.to_dict() == {
-        "schema_version": "htsr-combined-study-v3",
+        "schema_version": "htsr-combined-study-v4",
         "random_seed": 17,
         "bootstrap_replicates": 2_000,
         "signflip_replicates": 10_000,
@@ -57,7 +58,16 @@ def test_canonical_confirmatory_protocol_is_explicit_and_versioned() -> None:
         "min_role_coverage": 0.8,
         "cluster_count_rule": "sqrt_half",
         "external_evidence_role": "reused_descriptive",
+        "holdout_repeats": 20,
+        "holdout_test_fraction": 0.3,
     }
+
+
+def test_v3_protocol_remains_loadable_without_the_new_sensitivity() -> None:
+    protocol = load_protocol(LEGACY_PROTOCOL)
+
+    assert protocol.holdout_repeats == 0
+    assert "holdout_repeats" not in protocol.to_dict()
 
 
 def test_protocol_loader_rejects_unrecognized_fields(tmp_path: Path) -> None:
@@ -92,6 +102,8 @@ def test_cli_loads_protocol_without_execution_setting_arguments(
     assert isinstance(settings, StudyProtocol)
     assert settings.random_seed == 17
     assert settings.bootstrap_replicates == 2_000
+    assert settings.holdout_repeats == 20
+    assert settings.holdout_test_fraction == pytest.approx(0.3)
     assert captured["dry_run"] is True
 
 
