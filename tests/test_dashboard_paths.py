@@ -30,7 +30,7 @@ def test_default_run_paths_choose_latest_complete_local_runs(
     incomplete.mkdir()
     os.utime(incomplete, (30, 30))
 
-    scale_root = tmp_path / "research_runs" / "htsr_scaleup" / "runs"
+    scale_root = tmp_path / "research_runs" / "htsr_weight_only" / "runs"
     old_scale = _complete_run(scale_root, "scaleup_old", paths.SCALEUP_RUN_MARKERS, 10)
     new_scale = _complete_run(scale_root, "scaleup_new", paths.SCALEUP_RUN_MARKERS, 20)
 

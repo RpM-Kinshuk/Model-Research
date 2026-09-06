@@ -3,9 +3,11 @@ from __future__ import annotations
 """Scale a retained HTSR study without mutating its source artifacts."""
 
 import argparse
+from collections import defaultdict
 import hashlib
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -16,18 +18,44 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score, silhouette_score
 from sklearn.preprocessing import StandardScaler
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from spectral_research.study.artifacts import write_artifact_manifest
+from spectral_research.study.contracts import (
+    build_single_source_components,
+    load_graph_contract,
+)
 from spectral_research.study.contracts import canonical_model_id
 from spectral_research.study.features import CANONICAL_ROLES, confirmatory_schema_population
-from spectral_research.study.lineage import _signature_matrix, label_independent_cluster_count
+from spectral_research.study.lineage import (
+    _signature_matrix,
+    label_independent_cluster_count,
+    paper_style_alpha_similarity,
+)
 from spectral_research.study.performance import (
     MODERN_TASKS,
+    build_modern_targets,
     evaluate_external_transfer,
     evaluate_grouped_ridge,
     group_weighted_mae,
-    grouped_outer_folds,
     holm_adjust,
     paired_component_bootstrap,
     paired_component_signflip_pvalue,
+)
+from spectral_research.study.scaleup import (
+    balanced_branch_folds,
+    consensus_roots,
+    corroborated_edges,
+    first_root_branch,
+    map_overlap_to_phase2,
+    matched_family_recall,
+    metadata_edges,
+    name_consensus_families,
+    propagated_component_labels,
+    reconcile_phase2_legacy_targets,
+    reconcile_phase2_modern_targets,
+    sha256_file,
 )
 
 
@@ -136,6 +164,76 @@ def alpha_embedding_cache(
     return kept_ids, matrix, cache
 
 
+def paper_root_similarity_cache(
+    trajectory_paths: tuple[Path, ...],
+    query_ids: set[str],
+    root_ids: set[str],
+    *,
+    source_digests: tuple[str, ...],
+) -> tuple[list[str], list[str], np.ndarray, Path]:
+    ordered_queries = sorted(query_ids)
+    ordered_roots = sorted(root_ids)
+    payload = {
+        "method": "paper_eq2_spearman_dp_stored_dks_v1",
+        "source_digests": source_digests,
+        "query_ids": ordered_queries,
+        "root_ids": ordered_roots,
+    }
+    key = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:20]
+    cache = SCALE_ROOT / "cache" / f"lineage_closed_root_paper_{key}.npz"
+    if cache.is_file():
+        loaded = np.load(cache, allow_pickle=False)
+        cached_queries = loaded["query_ids"].astype(str).tolist()
+        cached_roots = loaded["root_ids"].astype(str).tolist()
+        similarity = loaded["similarity"].astype(np.float32, copy=False)
+        assert cached_queries == ordered_queries
+        assert cached_roots == ordered_roots
+        assert similarity.shape == (len(cached_queries), len(cached_roots))
+        return cached_queries, cached_roots, similarity, cache
+
+    wanted = query_ids | root_ids
+    selected: list[pd.DataFrame] = []
+    for trajectory_path in trajectory_paths:
+        for chunk in pd.read_csv(trajectory_path, chunksize=300_000, low_memory=False):
+            kept = chunk.loc[chunk["model_id"].astype(str).isin(wanted)]
+            if not kept.empty:
+                selected.append(kept)
+    trajectories = pd.concat(selected, ignore_index=True)
+    if trajectories.duplicated(["model_id", "role", "depth"]).any():
+        raise ValueError("closed-root trajectory sources overlap")
+    groups = {
+        str(model_id): frame
+        for model_id, frame in trajectories.groupby("model_id", sort=False)
+    }
+    missing = wanted.difference(groups)
+    if missing:
+        raise ValueError(f"closed-root trajectories missing requested models: {sorted(missing)[:3]}")
+
+    similarity = np.full(
+        (len(ordered_queries), len(ordered_roots)), np.nan, dtype=np.float32
+    )
+    for query_index, query_id in enumerate(ordered_queries):
+        for root_index, root_id in enumerate(ordered_roots):
+            similarity[query_index, root_index] = paper_style_alpha_similarity(
+                groups[query_id], groups[root_id]
+            )
+        if (query_index + 1) % 250 == 0:
+            print(
+                f"closed-root paper similarity: {query_index + 1}/{len(ordered_queries)}",
+                flush=True,
+            )
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        cache,
+        query_ids=np.asarray(ordered_queries),
+        root_ids=np.asarray(ordered_roots),
+        similarity=similarity,
+    )
+    return ordered_queries, ordered_roots, similarity, cache
+
+
 def embedding_lookup(
     dev_ids: list[str], dev_matrix: np.ndarray, ext_ids: list[str], ext_matrix: np.ndarray
 ) -> dict[str, np.ndarray]:
@@ -206,58 +304,6 @@ def group_ready(frame: pd.DataFrame) -> pd.DataFrame:
     return frame.loc[eligible].copy().reset_index(drop=True)
 
 
-def alpha_oof(
-    frame: pd.DataFrame,
-    embeddings: dict[str, np.ndarray],
-    targets: tuple[str, ...],
-    *,
-    method: str,
-) -> pd.DataFrame:
-    population = frame.loc[frame["model_id"].isin(embeddings)].copy()
-    population = group_ready(population).sort_values("model_id", kind="stable").reset_index(drop=True)
-    assert population["model_id"].is_unique
-    values = population.loc[:, targets].apply(pd.to_numeric, errors="coerce").to_numpy(float)
-    assert np.isfinite(values).all()
-    matrix = np.vstack([embeddings[model_id] for model_id in population["model_id"]])
-    groups = population["ancestry_component"].astype(str).to_numpy()
-    predictions = np.full_like(values, np.nan)
-    fold_ids = np.full(len(population), -1, dtype=int)
-    for fold in grouped_outer_folds(
-        population,
-        n_splits=OUTER_FOLDS,
-        random_state=SEED,
-        group_column="ancestry_component",
-    ):
-        predicted, _ = knn_predict(
-            matrix[fold.train_indices],
-            matrix[fold.test_indices],
-            values[fold.train_indices],
-            k=GROUP_K,
-            train_groups=groups[fold.train_indices],
-            distinct_groups=True,
-        )
-        predictions[fold.test_indices] = predicted
-        fold_ids[fold.test_indices] = fold.fold_id
-        assert set(groups[fold.train_indices]).isdisjoint(set(groups[fold.test_indices]))
-    assert np.isfinite(predictions).all() and np.all(fold_ids >= 0)
-    rows: list[dict[str, object]] = []
-    for target_index, target in enumerate(targets):
-        for row_index, row in population.iterrows():
-            rows.append(
-                {
-                    "model_id": str(row["model_id"]),
-                    "ancestry_component": str(row["ancestry_component"]),
-                    "source": str(row.get("source", "")),
-                    "target": target,
-                    "feature_block": method,
-                    "outer_fold": int(fold_ids[row_index]),
-                    "actual": float(values[row_index, target_index]),
-                    "prediction": float(predictions[row_index, target_index]),
-                }
-            )
-    return pd.DataFrame(rows)
-
-
 def alpha_on_ridge_folds(
     population: pd.DataFrame,
     ridge_predictions: pd.DataFrame,
@@ -299,80 +345,6 @@ def alpha_on_ridge_folds(
                     "outer_fold": int(fold_id),
                     "actual": float(values[global_index]),
                     "prediction": float(predicted[local_index]),
-                }
-            )
-    result = pd.DataFrame(rows)
-    assert len(result) == len(frame)
-    return result
-
-
-def residual_hybrid_on_ridge_folds(
-    population: pd.DataFrame,
-    ridge_predictions: pd.DataFrame,
-    embeddings: dict[str, np.ndarray],
-    *,
-    target: str,
-    method: str = "M+S+H+alpha_residual_k5_nested",
-) -> pd.DataFrame:
-    baseline = ridge_predictions.loc[
-        ridge_predictions["target"].eq(target)
-        & ridge_predictions["feature_block"].eq("M+S+H")
-    ].copy()
-    ids = set(baseline["model_id"].astype(str))
-    frame = population.loc[
-        population["model_id"].astype(str).isin(ids)
-        & population["model_id"].isin(embeddings)
-    ].copy()
-    frame = frame.sort_values("model_id", kind="stable").reset_index(drop=True)
-    assert set(frame["model_id"].astype(str)) == ids
-    baseline_by_model = baseline.set_index("model_id")
-    rows: list[dict[str, object]] = []
-    for fold_id in sorted(baseline["outer_fold"].unique()):
-        test_ids = set(
-            baseline.loc[baseline["outer_fold"].eq(fold_id), "model_id"].astype(str)
-        )
-        train = frame.loc[~frame["model_id"].astype(str).isin(test_ids)].reset_index(drop=True)
-        test = frame.loc[frame["model_id"].astype(str).isin(test_ids)].reset_index(drop=True)
-        assert set(train["ancestry_component"].astype(str)).isdisjoint(
-            set(test["ancestry_component"].astype(str))
-        )
-        inner_predictions, _, _ = evaluate_grouped_ridge(
-            train,
-            target=target,
-            outer_splits=INNER_FOLDS,
-            inner_splits=INNER_FOLDS,
-            ridge_alphas=RIDGE_ALPHAS,
-            random_state=SEED + int(fold_id),
-        )
-        inner = inner_predictions.loc[
-            inner_predictions["feature_block"].eq("M+S+H")
-        ].set_index("model_id")
-        assert set(inner.index.astype(str)) == set(train["model_id"].astype(str))
-        residuals = np.asarray(
-            [float(inner.at[model_id, "actual"] - inner.at[model_id, "prediction"]) for model_id in train["model_id"]],
-            dtype=float,
-        )
-        train_embeddings = np.vstack([embeddings[model_id] for model_id in train["model_id"]])
-        test_embeddings = np.vstack([embeddings[model_id] for model_id in test["model_id"]])
-        correction, _ = knn_predict(
-            train_embeddings,
-            test_embeddings,
-            residuals,
-            k=GROUP_K,
-            train_groups=train["ancestry_component"].astype(str).to_numpy(),
-            distinct_groups=True,
-        )
-        for index, row in test.iterrows():
-            model_id = str(row["model_id"])
-            rows.append(
-                {
-                    "model_id": model_id,
-                    "ancestry_component": str(row["ancestry_component"]),
-                    "target": target,
-                    "feature_block": method,
-                    "outer_fold": int(fold_id),
-                    "actual": float(row[target]),
-                    "prediction": float(baseline_by_model.at[model_id, "prediction"] + correction[index]),
                 }
             )
     result = pd.DataFrame(rows)
@@ -618,7 +590,7 @@ def broad_lineage(
     census = census.merge(strict, on="model_id", how="left", validate="one_to_one")
     census = census.merge(routes, on="model_id", how="left", validate="one_to_one")
     census = census.merge(manifest.loc[:, graph_columns], on="model_id", how="left", validate="one_to_one")
-    census["htsr_artifact_available"] = census["htsr_artifact_available"].fillna(False)
+    census["htsr_artifact_available"] = census["htsr_artifact_available"].eq(True)
     census["lineage_evidence_status"] = np.select(
         [
             census["strict_cluster"].notna(),
@@ -694,217 +666,962 @@ def route_spectral_families(
     )
 
 
-def build_exact_modern_populations(
-    manifest: pd.DataFrame,
-    dev_features: pd.DataFrame,
-    ext_features: pd.DataFrame,
-    dev_targets: pd.DataFrame,
-    ext_targets: pd.DataFrame,
-    frozen: pd.DataFrame,
+def _graph_metadata_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "model_id": frame["model_id"].map(canonical),
+            "source_model": frame.get("source_model", pd.Series("", index=frame.index)).map(canonical),
+            "base_model_relation": frame.get(
+                "base_model_relation", pd.Series("unknown", index=frame.index)
+            ).fillna("unknown"),
+            "graph_architecture": frame.get(
+                "Architecture", pd.Series("unknown", index=frame.index)
+            ).fillna("unknown"),
+        }
+    )
+
+
+def build_scaled_graph(
+    phase2: pd.DataFrame,
+    ablation: pd.DataFrame,
+    labels: pd.DataFrame,
+    graph_path: Path,
+) -> dict[str, object]:
+    base_edges, base_nodes, graph_metadata = load_graph_contract(graph_path)
+    augmented, accepted_edges, source_audit = metadata_edges(
+        (("phase2", phase2), ("ablation", ablation)),
+        base_edges,
+        base_nodes,
+    )
+    augmented_nodes = set(base_nodes) | set(accepted_edges.get("parent_id", [])) | set(
+        accepted_edges.get("child_id", [])
+    )
+    combined_metadata = pd.concat(
+        [graph_metadata, _graph_metadata_frame(phase2), _graph_metadata_frame(ablation)],
+        ignore_index=True,
+    )
+    selected_ids = list(
+        dict.fromkeys([*phase2["model_id"].astype(str), *ablation["model_id"].astype(str)])
+    )
+    components = build_single_source_components(
+        selected_ids,
+        augmented,
+        graph_nodes=augmented_nodes,
+        graph_metadata=combined_metadata,
+    )
+    components["component_graph_fingerprint"] = hashlib.sha256(
+        "\n".join(
+            f"{parent}\0{child}"
+            for parent, child in augmented.itertuples(index=False, name=None)
+        ).encode("utf-8")
+    ).hexdigest()
+
+    confirmed = labels.loc[
+        labels["label_status"].eq("confirmed")
+        & labels["audited_base_family"].notna()
+    ].copy()
+    conservative = propagated_component_labels(
+        phase2["model_id"].astype(str).tolist(),
+        corroborated_edges(base_edges, graph_metadata),
+        confirmed,
+    ).rename(
+        columns={
+            "metadata_family": "conservative_metadata_family",
+            "metadata_family_conflict": "conservative_family_conflict",
+        }
+    )
+    atlas_clean = propagated_component_labels(
+        phase2["model_id"].astype(str).tolist(),
+        base_edges,
+        confirmed,
+        graph_nodes=base_nodes,
+        graph_metadata=graph_metadata,
+    ).rename(
+        columns={
+            "metadata_family": "atlas_clean_metadata_family",
+            "metadata_family_conflict": "atlas_clean_family_conflict",
+        }
+    )
+    roots = consensus_roots(augmented, augmented_nodes)
+    moderate = name_consensus_families(
+        roots,
+        confirmed,
+        phase2["model_id"].astype(str).tolist(),
+    ).rename(
+        columns={
+            "metadata_family": "moderate_metadata_family",
+            "metadata_family_conflict": "moderate_family_conflict",
+        }
+    )
+    phase2_components = components.loc[
+        components["model_id"].isin(set(phase2["model_id"].astype(str)))
+    ].copy()
+    branches = first_root_branch(phase2_components, augmented)
+    return {
+        "base_edges": base_edges,
+        "base_nodes": base_nodes,
+        "augmented_edges": augmented,
+        "accepted_edges": accepted_edges,
+        "source_audit": source_audit,
+        "components": components,
+        "branches": branches,
+        "conservative": conservative,
+        "atlas_clean": atlas_clean,
+        "moderate": moderate,
+        "graph_metadata": graph_metadata,
+    }
+
+
+def _modern_table(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    prepared = raw.rename(
+        columns={
+            "target_model_sha": "model_sha",
+            "target_eval_name": "eval_name",
+            "target_architecture": "architecture",
+        }
+    )
+    targets, exclusions = build_modern_targets(prepared)
+    provenance_columns = [
+        "model_id",
+        "target_source",
+        "target_source_row",
+        "target_resolution",
+        "source_population",
+    ]
+    available = [column for column in provenance_columns if column in raw.columns]
+    targets = targets.merge(
+        raw.loc[:, available].drop_duplicates("model_id"),
+        on="model_id",
+        how="left",
+        validate="one_to_one",
+    )
+    return targets, exclusions
+
+
+def _legacy_table(
+    raw: pd.DataFrame,
+    *,
+    source_population: str,
+    target_source: str,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    graph_columns = [
-        "model_id", "ancestry_component", "component_provenance", "component_edge_count",
-        "component_graph_fingerprint", "development_artifact_available",
-    ]
-    populations: list[pd.DataFrame] = []
-    for scope, features, targets in (
-        ("development", dev_features, dev_targets),
-        ("external", ext_features, ext_targets),
-    ):
-        ids = set(frozen.loc[frozen["evaluation_scope"].eq(scope), "model_id"].astype(str))
-        population = (
-            features.loc[features["model_id"].astype(str).isin(ids)]
-            .merge(targets, on="model_id", how="inner", validate="one_to_one")
-            .merge(manifest.loc[:, graph_columns], on="model_id", how="inner", validate="one_to_one")
-            .sort_values("model_id", kind="stable", ignore_index=True)
-        )
-        assert set(population["model_id"].astype(str)) == ids
-        population["source"] = "phase2" if scope == "development" else "ablation"
-        populations.append(population)
-    return populations[0], populations[1]
-
-
-def source_heldout_modern(
-    dev: pd.DataFrame,
-    ext: pd.DataFrame,
-    manifest: pd.DataFrame,
-    frozen: pd.DataFrame,
-    embeddings: dict[str, np.ndarray],
-    broad_dev_targets: pd.DataFrame,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    universe = manifest.loc[manifest["development_artifact_available"].fillna(False).astype(bool)]
-    prediction_frames: list[pd.DataFrame] = []
-    dev_alpha = dev.loc[dev["model_id"].isin(embeddings)].reset_index(drop=True)
-    ext_alpha = ext.loc[ext["model_id"].isin(embeddings)].reset_index(drop=True)
-    dev_matrix = np.vstack([embeddings[model_id] for model_id in dev_alpha["model_id"]])
-    ext_matrix = np.vstack([embeddings[model_id] for model_id in ext_alpha["model_id"]])
-    dev_groups = dev_alpha["ancestry_component"].astype(str).to_numpy()
-    broad_train = broad_dev_targets.loc[broad_dev_targets["model_id"].isin(embeddings)].copy()
-    broad_train = broad_train.sort_values("model_id", kind="stable").reset_index(drop=True)
-    broad_matrix = np.vstack([embeddings[model_id] for model_id in broad_train["model_id"]])
-    broad_groups = broad_train["ancestry_component"].fillna("").astype(str).to_numpy()
-    broad_groups = np.asarray(
-        [group if group else f"unknown::{model_id}" for group, model_id in zip(broad_groups, broad_train["model_id"])],
-        dtype=object,
-    )
-
-    for target in MODERN_TARGETS:
-        ridge_predictions, _, _ = evaluate_external_transfer(
-            dev,
-            ext,
-            target=target,
-            development_component_universe=universe,
-            inner_splits=INNER_FOLDS,
-            ridge_alphas=RIDGE_ALPHAS,
-            random_state=SEED,
-        )
-        prediction_frames.append(ridge_predictions)
-        slice_by_model = ridge_predictions.loc[
-            ridge_predictions["feature_block"].eq("M+S+H"),
-            ["model_id", "external_slice"],
-        ].set_index("model_id")["external_slice"]
-        dev_values = dev_alpha[target].to_numpy(float)
-        strict_alpha, _ = knn_predict(
-            dev_matrix, ext_matrix, dev_values, k=GROUP_K,
-            train_groups=dev_groups, distinct_groups=True,
-        )
-        broad_values = broad_train[target].to_numpy(float)
-        broad_alpha, _ = knn_predict(
-            broad_matrix, ext_matrix, broad_values, k=GROUP_K,
-            train_groups=broad_groups, distinct_groups=True,
-        )
-        frozen_dev = frozen.loc[
-            frozen["evaluation_scope"].eq("development")
-            & frozen["target"].eq(target)
-            & frozen["feature_block"].eq("M+S+H")
-        ].set_index("model_id")
-        residuals = np.asarray(
-            [float(frozen_dev.at[model_id, "actual"] - frozen_dev.at[model_id, "prediction"]) for model_id in dev_alpha["model_id"]],
-            dtype=float,
-        )
-        residual_prediction, _ = knn_predict(
-            dev_matrix, ext_matrix, residuals, k=GROUP_K,
-            train_groups=dev_groups, distinct_groups=True,
-        )
-        baseline = ridge_predictions.loc[ridge_predictions["feature_block"].eq("M+S+H")].set_index("model_id")
-        for row_index, row in ext_alpha.iterrows():
-            model_id = str(row["model_id"])
-            common = {
-                "model_id": model_id,
-                "ancestry_component": str(row["ancestry_component"]),
-                "target": target,
-                "actual": float(row[target]),
-                "external_slice": str(slice_by_model.at[model_id]),
-            }
-            for method, prediction in (
-                ("alpha_profile_k5_strict_train", strict_alpha[row_index]),
-                ("alpha_profile_k5_all_labeled_train", broad_alpha[row_index]),
-                (
-                    "M+S+H+alpha_residual_k5",
-                    float(baseline.at[model_id, "prediction"]) + residual_prediction[row_index],
-                ),
-            ):
-                prediction_frames.append(pd.DataFrame([{**common, "feature_block": method, "prediction": float(prediction)}]))
-    predictions = pd.concat(prediction_frames, ignore_index=True, sort=False)
-    metrics = metric_rows(predictions, scope="source_heldout_modern")
-    increments = increment_rows(
-        predictions,
-        baseline="M+S+H",
-        candidates=(
-            "alpha_profile_k5_strict_train",
-            "alpha_profile_k5_all_labeled_train",
-            "M+S+H+alpha_residual_k5",
-        ),
-        secondary_targets=MODERN_TASKS,
-        scope="source_heldout_modern",
-    )
-    if EXTERNAL_EVIDENCE_ROLE != "prospective_confirmatory":
-        increments["inferential"] = False
-        increments["inference_reason"] = EXTERNAL_EVIDENCE_ROLE
-    return predictions, metrics, increments
-
-
-def build_legacy_targets(raw: pd.DataFrame) -> pd.DataFrame:
-    working = raw.loc[:, ["model_id", *LEGACY_TASKS]].copy()
+    working = raw.copy()
     working["model_id"] = working["model_id"].map(canonical)
-    for target in LEGACY_TASKS:
-        working[target] = pd.to_numeric(working[target], errors="coerce")
-        working.loc[~working[target].between(0.0, 100.0), target] = np.nan
-    working["legacy_average"] = working.loc[:, LEGACY_TASKS].mean(axis=1, skipna=False)
-    working = working.loc[working["model_id"].ne("")].drop_duplicates("model_id", keep=False)
-    return working.sort_values("model_id", kind="stable", ignore_index=True)
-
-
-def legacy_study(
-    legacy_targets: pd.DataFrame,
-    ext_features: pd.DataFrame,
-    manifest: pd.DataFrame,
-    embeddings: dict[str, np.ndarray],
-) -> tuple[
-    pd.DataFrame,
-    pd.DataFrame,
-    pd.DataFrame,
-    pd.DataFrame,
-    pd.DataFrame,
-    pd.DataFrame,
-]:
-    graph_columns = [
-        "model_id", "ancestry_component", "component_provenance", "component_edge_count",
+    values = working.loc[:, LEGACY_TASKS].apply(pd.to_numeric, errors="coerce")
+    valid = values.notna().all(axis=1) & values.ge(0.0).all(axis=1) & values.le(100.0).all(axis=1)
+    rejected = working.loc[~valid, ["model_id"]].copy()
+    rejected["reason"] = "incomplete_or_out_of_range_legacy_target"
+    working = working.loc[valid].copy()
+    working.loc[:, LEGACY_TASKS] = values.loc[valid]
+    if working["model_id"].duplicated().any():
+        raise ValueError(f"duplicate complete legacy targets in {target_source}")
+    working["legacy_average"] = working.loc[:, LEGACY_TASKS].mean(axis=1)
+    if "target_model_sha" not in working:
+        working["target_model_sha"] = working.get(
+            "model_sha", working.get("Model sha", pd.Series("", index=working.index))
+        ).fillna("")
+    if "target_eval_name" not in working:
+        working["target_eval_name"] = working.get(
+            "eval_name", pd.Series("", index=working.index)
+        ).fillna("")
+    if "target_architecture" not in working:
+        working["target_architecture"] = working.get(
+            "Architecture", pd.Series("", index=working.index)
+        ).fillna("")
+    working["target_source"] = working.get(
+        "target_source", pd.Series(target_source, index=working.index)
+    ).fillna(target_source)
+    working["source_population"] = source_population
+    working["benchmark_generation"] = "legacy"
+    columns = [
+        "model_id",
+        *LEGACY_TASKS,
+        "legacy_average",
+        "target_model_sha",
+        "target_eval_name",
+        "target_architecture",
+        "target_source",
+        "source_population",
+        "benchmark_generation",
     ]
-    broad = legacy_targets.merge(manifest.loc[:, graph_columns], on="model_id", how="left", validate="one_to_one")
-    broad["source"] = "ablation"
-    complete = broad.loc[broad.loc[:, LEGACY_TARGETS].notna().all(axis=1)].copy()
-    paper = paper_random_splits(complete, embeddings, LEGACY_TARGETS)
-    grouped = alpha_oof(complete, embeddings, LEGACY_TARGETS, method="alpha_profile_k5_component_distinct")
+    return working.loc[:, columns].sort_values("model_id", ignore_index=True), rejected
 
-    strict_features, _ = confirmatory_schema_population(
-        ext_features, min_role_coverage=BROAD_COVERAGE
+
+def reconcile_targets(
+    phase2: pd.DataFrame,
+    ablation: pd.DataFrame,
+    overlap: pd.DataFrame,
+    retained_modern: pd.DataFrame,
+) -> dict[str, pd.DataFrame]:
+    mapped = map_overlap_to_phase2(phase2, overlap)
+    recovered_modern_raw, modern_audit = reconcile_phase2_modern_targets(
+        phase2,
+        mapped,
+        retained_modern,
+        tasks=MODERN_TASKS,
     )
-    strict = (
-        strict_features.merge(legacy_targets, on="model_id", how="inner", validate="one_to_one")
-        .merge(manifest.loc[:, graph_columns], on="model_id", how="left", validate="one_to_one")
+    phase2_modern, modern_exclusions = _modern_table(recovered_modern_raw)
+    ablation_modern_raw = ablation.copy()
+    ablation_modern_raw["target_source"] = "ablation_selected"
+    ablation_modern_raw["target_source_row"] = np.arange(len(ablation_modern_raw))
+    ablation_modern_raw["target_resolution"] = "selected_source_row"
+    ablation_modern_raw["source_population"] = "ablation"
+    ablation_modern, ablation_modern_exclusions = _modern_table(ablation_modern_raw)
+    modern = pd.concat([phase2_modern, ablation_modern], ignore_index=True, sort=False)
+    if modern["model_id"].duplicated().any():
+        raise ValueError("reconciled modern targets overlap between populations")
+
+    recovered_legacy_raw, legacy_audit = reconcile_phase2_legacy_targets(
+        mapped, tasks=LEGACY_TASKS
     )
-    ridge_frames: list[pd.DataFrame] = []
-    for target in LEGACY_TARGETS:
-        target_population = strict.loc[
-            np.isfinite(pd.to_numeric(strict[target], errors="coerce"))
-            & strict["model_id"].isin(embeddings)
-        ].copy()
-        ridge_predictions, _, _ = evaluate_grouped_ridge(
-            target_population,
+    phase2_legacy, legacy_phase_exclusions = _legacy_table(
+        recovered_legacy_raw,
+        source_population="phase2",
+        target_source="ablation_overlap_audit",
+    )
+    ablation_legacy, ablation_legacy_exclusions = _legacy_table(
+        ablation,
+        source_population="ablation",
+        target_source="ablation_selected",
+    )
+    legacy = pd.concat([phase2_legacy, ablation_legacy], ignore_index=True, sort=False)
+    if legacy["model_id"].duplicated().any():
+        raise ValueError("reconciled legacy targets overlap between populations")
+
+    audit = pd.concat([modern_audit, legacy_audit], ignore_index=True, sort=False)
+    exclusions = pd.concat(
+        [
+            modern_exclusions.assign(source="phase2_modern"),
+            ablation_modern_exclusions.assign(source="ablation_modern"),
+            legacy_phase_exclusions.assign(source="phase2_legacy"),
+            ablation_legacy_exclusions.assign(source="ablation_legacy"),
+        ],
+        ignore_index=True,
+        sort=False,
+    )
+    return {
+        "mapped_overlap": mapped,
+        "modern": modern.sort_values("model_id", ignore_index=True),
+        "legacy": legacy.sort_values("model_id", ignore_index=True),
+        "audit": audit,
+        "exclusions": exclusions,
+    }
+
+
+def _evaluation_groups(frame: pd.DataFrame) -> pd.DataFrame:
+    result = frame.copy()
+    components = sorted(result["ancestry_component"].astype(str).unique())
+    parent = {component: component for component in components}
+
+    def find(value: str) -> str:
+        while parent[value] != value:
+            parent[value] = parent[parent[value]]
+            value = parent[value]
+        return value
+
+    def union(left: str, right: str) -> None:
+        a, b = find(left), find(right)
+        if a != b:
+            parent[max(a, b)] = min(a, b)
+
+    identity_groups: list[pd.Series] = []
+    sha = result.get("target_model_sha", pd.Series("", index=result.index)).fillna("").astype(str).str.strip().str.casefold()
+    identity_groups.extend(group for _, group in result.loc[sha.ne("")].groupby(sha[sha.ne("")]))
+    model_key = result["model_id"].astype(str).str.casefold()
+    identity_groups.extend(group for _, group in result.groupby(model_key))
+    for group in identity_groups:
+        values = sorted(set(group["ancestry_component"].astype(str)))
+        for value in values[1:]:
+            union(values[0], value)
+    members: dict[str, list[str]] = defaultdict(list)
+    for component in components:
+        members[find(component)].append(component)
+    identifiers = {
+        member: "split_" + hashlib.sha256("\0".join(sorted(values)).encode("utf-8")).hexdigest()[:16]
+        for values in members.values()
+        for member in values
+    }
+    result["graph_component"] = result["ancestry_component"].astype(str)
+    result["ancestry_component"] = result["graph_component"].map(identifiers)
+    return result
+
+
+def performance_population(
+    features: pd.DataFrame,
+    targets: pd.DataFrame,
+    components: pd.DataFrame,
+    *,
+    min_role_coverage: float,
+) -> pd.DataFrame:
+    strict, _ = confirmatory_schema_population(features, min_role_coverage)
+    graph_columns = [
+        "model_id",
+        "ancestry_component",
+        "component_provenance",
+        "component_edge_count",
+        "component_root_model",
+        "component_graph_fingerprint",
+    ]
+    population = (
+        strict.merge(targets, on="model_id", how="inner", validate="one_to_one")
+        .merge(
+            components.loc[:, graph_columns],
+            on="model_id",
+            how="left",
+            validate="one_to_one",
+        )
+        .sort_values("model_id", kind="stable", ignore_index=True)
+    )
+    population = group_ready(population)
+    return _evaluation_groups(population)
+
+
+def grouped_performance(
+    population: pd.DataFrame,
+    embeddings: dict[str, np.ndarray],
+    targets: tuple[str, ...],
+    *,
+    scope: str,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    paired = population.loc[population["model_id"].isin(embeddings)].copy().reset_index(drop=True)
+    prediction_frames: list[pd.DataFrame] = []
+    fit_audit: list[dict[str, object]] = []
+    for target in targets:
+        ridge, _, audit = evaluate_grouped_ridge(
+            paired,
             target=target,
             outer_splits=OUTER_FOLDS,
             inner_splits=INNER_FOLDS,
             ridge_alphas=RIDGE_ALPHAS,
             random_state=SEED,
         )
-        alpha_predictions = alpha_on_ridge_folds(
-            target_population, ridge_predictions, embeddings, target=target
-        )
-        ridge_frames.extend((ridge_predictions, alpha_predictions))
-        if target == "legacy_average":
-            ridge_frames.append(
-                residual_hybrid_on_ridge_folds(
-                    target_population,
-                    ridge_predictions,
-                    embeddings,
-                    target=target,
-                )
-            )
-    paired = pd.concat(ridge_frames, ignore_index=True, sort=False)
-    paired_metrics = metric_rows(paired, scope="legacy_grouped_paired")
+        alpha = alpha_on_ridge_folds(paired, ridge, embeddings, target=target)
+        prediction_frames.extend([ridge, alpha])
+        fit_audit.extend({"target": target, **row} for row in audit)
+    predictions = pd.concat(prediction_frames, ignore_index=True)
+    metrics = metric_rows(predictions, scope=scope)
     increments = increment_rows(
-        paired,
+        predictions,
         baseline="M+S+H",
-        candidates=(
-            "alpha_profile_k5_component_distinct",
-            "M+S+H+alpha_residual_k5_nested",
-        ),
-        secondary_targets=LEGACY_TASKS,
-        scope="legacy_grouped_paired",
+        candidates=("alpha_profile_k5_component_distinct",),
+        secondary_targets=targets[1:],
+        scope=scope,
     )
-    grouped_metrics = metric_rows(grouped, scope="legacy_grouped_alpha_broad")
-    return paper, grouped, grouped_metrics, paired, paired_metrics, increments
+    return predictions, metrics, increments, pd.DataFrame(fit_audit)
+
+
+def source_heldout_modern_full(
+    population: pd.DataFrame,
+    embeddings: dict[str, np.ndarray],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    development = population.loc[population["source_population"].eq("phase2")].copy()
+    external = population.loc[population["source_population"].eq("ablation")].copy()
+    prediction_frames: list[pd.DataFrame] = []
+    for target in MODERN_TARGETS:
+        ridge, _, _ = evaluate_external_transfer(
+            development,
+            external,
+            target=target,
+            development_component_universe=development,
+            inner_splits=INNER_FOLDS,
+            ridge_alphas=RIDGE_ALPHAS,
+            random_state=SEED,
+        )
+        prediction_frames.append(ridge)
+        baseline = ridge.loc[ridge["feature_block"].eq("M+S+H")].set_index("model_id")
+        train_matrix = np.vstack([embeddings[model_id] for model_id in development["model_id"]])
+        test_matrix = np.vstack([embeddings[model_id] for model_id in external["model_id"]])
+        predicted, _ = knn_predict(
+            train_matrix,
+            test_matrix,
+            development[target].to_numpy(float),
+            k=GROUP_K,
+            train_groups=development["ancestry_component"].astype(str).to_numpy(),
+            distinct_groups=True,
+        )
+        rows = []
+        for position, row in external.reset_index(drop=True).iterrows():
+            model_id = str(row["model_id"])
+            rows.append(
+                {
+                    "model_id": model_id,
+                    "ancestry_component": str(row["ancestry_component"]),
+                    "target": target,
+                    "feature_block": "alpha_profile_k5_strict_train",
+                    "actual": float(row[target]),
+                    "prediction": float(predicted[position]),
+                    "external_slice": str(baseline.at[model_id, "external_slice"]),
+                }
+            )
+        prediction_frames.append(pd.DataFrame(rows))
+    predictions = pd.concat(prediction_frames, ignore_index=True)
+    metrics = metric_rows(predictions, scope="source_heldout_modern_full")
+    increments = increment_rows(
+        predictions,
+        baseline="M+S+H",
+        candidates=("alpha_profile_k5_strict_train",),
+        secondary_targets=MODERN_TASKS,
+        scope="source_heldout_modern_full",
+    )
+    increments["inferential"] = False
+    increments["inference_reason"] = EXTERNAL_EVIDENCE_ROLE
+    return predictions, metrics, increments
+
+
+def _centroid_predictions(
+    population: pd.DataFrame,
+    columns: list[str],
+    *,
+    method: str,
+) -> pd.DataFrame:
+    matrix = population.loc[:, columns].apply(pd.to_numeric, errors="coerce").to_numpy(float)
+    actual = population["component_root_model"].astype(str).to_numpy()
+    rows: list[dict[str, object]] = []
+    for fold in sorted(population["branch_fold"].unique()):
+        train = population["branch_fold"].to_numpy() != fold
+        test = ~train
+        active = np.isfinite(matrix[train]).any(axis=0)
+        train_matrix = matrix[train][:, active]
+        query = matrix[test][:, active]
+        center = np.nanmedian(train_matrix, axis=0)
+        q25, q75 = np.nanquantile(train_matrix, [0.25, 0.75], axis=0)
+        scale = q75 - q25
+        scale = np.where(np.isfinite(scale) & (scale > np.finfo(float).eps), scale, 1.0)
+        train_z = (train_matrix - center) / scale
+        query_z = (query - center) / scale
+        train_labels = actual[train]
+        classes = sorted(set(train_labels))
+        centroids = np.vstack(
+            [np.nanmedian(train_z[train_labels == label], axis=0) for label in classes]
+        )
+        distances = np.full((len(query_z), len(classes)), np.inf)
+        for index, centroid in enumerate(centroids):
+            shared = np.isfinite(query_z) & np.isfinite(centroid)[None, :]
+            coverage = shared.mean(axis=1)
+            squared = np.where(shared, np.square(query_z - centroid), 0.0)
+            distance = np.sqrt(squared.sum(axis=1) / np.maximum(shared.sum(axis=1), 1))
+            distance[coverage < BROAD_COVERAGE] = np.inf
+            distances[:, index] = distance
+        order = np.argsort(distances, axis=1, kind="stable")
+        global_indices = np.flatnonzero(test)
+        class_values = np.asarray(classes, dtype=object)
+        for local_index, global_index in enumerate(global_indices):
+            if not np.isfinite(distances[local_index]).any():
+                rows.append(
+                    {
+                        "model_id": str(population.iloc[global_index]["model_id"]),
+                        "actual_root": actual[global_index],
+                        "predicted_root": "",
+                        "root_branch_model": str(population.iloc[global_index]["root_branch_model"]),
+                        "branch_fold": int(fold),
+                        "method": method,
+                        "scorable": False,
+                        "correct": False,
+                        "actual_rank": pd.NA,
+                        "top3_correct": False,
+                        "score": np.nan,
+                        "margin": np.nan,
+                    }
+                )
+                continue
+            ranked = class_values[order[local_index]]
+            rank = int(np.flatnonzero(ranked == actual[global_index])[0]) + 1
+            best = int(order[local_index, 0])
+            second = int(order[local_index, 1]) if len(classes) > 1 else best
+            rows.append(
+                {
+                    "model_id": str(population.iloc[global_index]["model_id"]),
+                    "actual_root": actual[global_index],
+                    "predicted_root": str(classes[best]),
+                    "root_branch_model": str(population.iloc[global_index]["root_branch_model"]),
+                    "branch_fold": int(fold),
+                    "method": method,
+                    "scorable": True,
+                    "correct": bool(rank == 1),
+                    "actual_rank": rank,
+                    "top3_correct": bool(rank <= 3),
+                    "score": float(-distances[local_index, best]),
+                    "margin": float(distances[local_index, second] - distances[local_index, best]),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _profile_centroid_predictions(
+    population: pd.DataFrame,
+    embeddings: dict[str, np.ndarray],
+) -> pd.DataFrame:
+    population = population.reset_index(drop=True)
+    rows: list[dict[str, object]] = []
+    for fold in sorted(population["branch_fold"].unique()):
+        train = population.loc[
+            population["branch_fold"].ne(fold)
+            & population["model_id"].isin(embeddings)
+        ]
+        test = population.loc[population["branch_fold"].eq(fold)]
+        train_labels = train["component_root_model"].astype(str).to_numpy()
+        classes = sorted(set(train_labels))
+        train_matrix = np.vstack([embeddings[model_id] for model_id in train["model_id"]])
+        centers = []
+        for label in classes:
+            center = train_matrix[train_labels == label].mean(axis=0).reshape(
+                len(CANONICAL_ROLES), -1
+            )
+            norms = np.linalg.norm(center, axis=1, keepdims=True)
+            centers.append((center / np.maximum(norms, np.finfo(float).eps)).reshape(-1))
+        centers_array = np.vstack(centers)
+        class_values = np.asarray(classes, dtype=object)
+        for row in test.itertuples(index=False):
+            model_id = str(row.model_id)
+            actual_root = str(row.component_root_model)
+            reason = ""
+            if model_id not in embeddings:
+                reason = "query_profile_unavailable"
+            elif actual_root not in classes:
+                reason = "root_training_profile_unavailable"
+            if reason:
+                rows.append(
+                    {
+                        "model_id": model_id,
+                        "actual_root": actual_root,
+                        "predicted_root": "",
+                        "root_branch_model": str(row.root_branch_model),
+                        "branch_fold": int(fold),
+                        "method": "alpha_profile",
+                        "scorable": False,
+                        "unscorable_reason": reason,
+                        "correct": False,
+                        "actual_rank": pd.NA,
+                        "top3_correct": False,
+                        "score": np.nan,
+                        "margin": np.nan,
+                    }
+                )
+                continue
+            similarity = embeddings[model_id] @ centers_array.T / float(
+                len(CANONICAL_ROLES)
+            )
+            order = np.argsort(-similarity, kind="stable")
+            ranked = class_values[order]
+            rank = int(np.flatnonzero(ranked == actual_root)[0]) + 1
+            best = int(order[0])
+            second = int(order[1]) if len(classes) > 1 else best
+            rows.append(
+                {
+                    "model_id": model_id,
+                    "actual_root": actual_root,
+                    "predicted_root": str(classes[best]),
+                    "root_branch_model": str(row.root_branch_model),
+                    "branch_fold": int(fold),
+                    "method": "alpha_profile",
+                    "scorable": True,
+                    "unscorable_reason": "",
+                    "correct": bool(rank == 1),
+                    "actual_rank": rank,
+                    "top3_correct": bool(rank <= 3),
+                    "score": float(similarity[best]),
+                    "margin": float(similarity[best] - similarity[second]),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def branch_metric_rows(predictions: pd.DataFrame) -> pd.DataFrame:
+    rng = np.random.default_rng(SEED)
+    rows = []
+    for method, eligible in predictions.groupby("method", sort=False):
+        frame = eligible.loc[eligible["scorable"].eq(True)].copy()
+        by_root = frame.assign(reciprocal_rank=1.0 / frame["actual_rank"]).groupby("actual_root").agg(
+            n=("model_id", "size"),
+            correct=("correct", "sum"),
+            accuracy=("correct", "mean"),
+            top3=("top3_correct", "mean"),
+            mrr=("reciprocal_rank", "mean"),
+        )
+        roots = np.arange(len(by_root))
+        macro_samples = np.empty(BOOTSTRAP_REPLICATES)
+        micro_samples = np.empty(BOOTSTRAP_REPLICATES)
+        for replicate in range(BOOTSTRAP_REPLICATES):
+            sample = rng.choice(roots, size=len(roots), replace=True)
+            chosen = by_root.iloc[sample]
+            macro_samples[replicate] = chosen["accuracy"].mean()
+            micro_samples[replicate] = chosen["correct"].sum() / chosen["n"].sum()
+        rows.append(
+            {
+                "method": method,
+                "n_eligible": int(len(eligible)),
+                "n_models": int(len(frame)),
+                "coverage": float(len(frame) / len(eligible)),
+                "n_roots": int(frame["actual_root"].nunique()),
+                "n_branches": int(frame["root_branch_model"].nunique()),
+                "micro_top1": float(frame["correct"].mean()),
+                "micro_top1_ci_low": float(np.quantile(micro_samples, 0.025)),
+                "micro_top1_ci_high": float(np.quantile(micro_samples, 0.975)),
+                "root_macro_top1": float(by_root["accuracy"].mean()),
+                "root_macro_top1_ci_low": float(np.quantile(macro_samples, 0.025)),
+                "root_macro_top1_ci_high": float(np.quantile(macro_samples, 0.975)),
+                "top3_accuracy": float(frame["top3_correct"].mean()),
+                "root_macro_top3": float(by_root["top3"].mean()),
+                "mean_reciprocal_rank": float((1.0 / frame["actual_rank"]).mean()),
+                "root_macro_mrr": float(by_root["mrr"].mean()),
+                "label_source": "atlas_plus_represented_strong_local_sources",
+                "evidence_role": "metadata_graph_agreement",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def branch_lineage_population(
+    branches: pd.DataFrame,
+    features: pd.DataFrame,
+    strict_assignments: pd.DataFrame,
+) -> pd.DataFrame:
+    population = branches.loc[
+        branches["model_id"].isin(set(strict_assignments["model_id"].astype(str)))
+        & branches["ancestry_component"].notna()
+        & branches["root_branch_model"].notna()
+    ].copy()
+    root_counts = population.groupby("component_root_model").agg(
+        n_models=("model_id", "size"),
+        n_branches=("root_branch_model", "nunique"),
+    )
+    eligible_roots = set(
+        root_counts.loc[
+            root_counts["n_models"].ge(5) & root_counts["n_branches"].ge(2)
+        ].index
+    )
+    population = population.loc[
+        population["component_root_model"].isin(eligible_roots)
+    ].merge(features, on="model_id", how="inner", validate="one_to_one")
+    population["branch_fold"] = balanced_branch_folds(population, n_splits=OUTER_FOLDS)
+    return population
+
+
+def evaluate_branch_lineage(
+    population: pd.DataFrame,
+    embeddings: dict[str, np.ndarray],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    m_columns = [column for column in population if column.startswith("M__")]
+    s_columns = [column for column in population if column.startswith("S__")]
+    h_columns = [column for column in population if column.startswith("H__")]
+    methods = {
+        "M": m_columns,
+        "S": s_columns,
+        "H": h_columns,
+        "alpha_summary": [column for column in h_columns if "__alpha__" in column],
+        "S+H": [*s_columns, *h_columns],
+        "M+S+H": [*m_columns, *s_columns, *h_columns],
+    }
+    predictions = pd.concat(
+        [
+            *[
+                _centroid_predictions(population, columns, method=method)
+                for method, columns in methods.items()
+            ],
+            _profile_centroid_predictions(population, embeddings),
+        ],
+        ignore_index=True,
+    )
+    fold_audit = (
+        population.groupby("branch_fold")
+        .agg(
+            n_models=("model_id", "size"),
+            n_roots=("component_root_model", "nunique"),
+            n_branches=("root_branch_model", "nunique"),
+        )
+        .reset_index()
+    )
+    return predictions, branch_metric_rows(predictions), fold_audit
+
+
+def evaluate_exact_root_lineage(
+    population: pd.DataFrame,
+    development_features: pd.DataFrame,
+    external_features: pd.DataFrame,
+    development_profile_ids: set[str],
+    external_profile_ids: set[str],
+    embeddings: dict[str, np.ndarray],
+    paper_query_ids: list[str],
+    paper_root_ids: list[str],
+    paper_similarity: np.ndarray,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    roots = sorted(population["component_root_model"].astype(str).unique())
+    development_feature_ids = set(development_features["model_id"].astype(str))
+    external_feature_ids = set(external_features["model_id"].astype(str))
+    candidate_roots = [root for root in roots if root in embeddings]
+    candidate_values = np.asarray(candidate_roots, dtype=object)
+    root_matrix = (
+        np.vstack([embeddings[root] for root in candidate_roots])
+        if candidate_roots
+        else np.empty((0, len(CANONICAL_ROLES) * GRID_SIZE), dtype=np.float32)
+    )
+
+    rows: list[dict[str, object]] = []
+    for row in population.itertuples(index=False):
+        model_id = str(row.model_id)
+        actual_root = str(row.component_root_model)
+        reason = ""
+        if actual_root not in candidate_roots:
+            reason = "exact_root_profile_unavailable"
+        elif model_id not in embeddings:
+            reason = "query_profile_unavailable"
+
+        result: dict[str, object] = {
+            "model_id": model_id,
+            "actual_root": actual_root,
+            "predicted_root": "",
+            "root_branch_model": str(row.root_branch_model),
+            "branch_fold": int(row.branch_fold),
+            "method": "exact_root_alpha_profile",
+            "endpoint": "closed_set_exact_root_gallery",
+            "candidate_count": len(candidate_roots),
+            "scorable": not reason,
+            "unscorable_reason": reason,
+            "correct": False,
+            "actual_rank": pd.NA,
+            "top3_correct": False,
+            "score": np.nan,
+            "margin": np.nan,
+            "estimator_provenance": (
+                "rolewise_interp32_rank_cosine_stored_dks_not_fixed_hill"
+            ),
+        }
+        if not reason:
+            similarity = embeddings[model_id] @ root_matrix.T / float(len(CANONICAL_ROLES))
+            order = np.argsort(-similarity, kind="stable")
+            ranked = candidate_values[order]
+            rank = int(np.flatnonzero(ranked == actual_root)[0]) + 1
+            best = int(order[0])
+            second = int(order[1]) if len(order) > 1 else best
+            result.update(
+                {
+                    "predicted_root": str(candidate_values[best]),
+                    "correct": bool(rank == 1),
+                    "actual_rank": rank,
+                    "top3_correct": bool(rank <= 3),
+                    "score": float(similarity[best]),
+                    "margin": float(similarity[best] - similarity[second]),
+                }
+            )
+        rows.append(result)
+
+    paper_query_index = {model_id: index for index, model_id in enumerate(paper_query_ids)}
+    paper_root_index = {model_id: index for index, model_id in enumerate(paper_root_ids)}
+    for row in population.itertuples(index=False):
+        model_id = str(row.model_id)
+        actual_root = str(row.component_root_model)
+        reason = ""
+        if actual_root not in paper_root_index:
+            reason = "exact_root_profile_unavailable"
+        elif model_id not in paper_query_index:
+            reason = "query_profile_unavailable"
+        scores = (
+            paper_similarity[paper_query_index[model_id]]
+            if not reason
+            else np.asarray([], dtype=float)
+        )
+        if not reason and not np.isfinite(scores[paper_root_index[actual_root]]):
+            reason = "true_root_similarity_unavailable"
+        result = {
+            "model_id": model_id,
+            "actual_root": actual_root,
+            "predicted_root": "",
+            "root_branch_model": str(row.root_branch_model),
+            "branch_fold": int(row.branch_fold),
+            "method": "exact_root_paper_spearman_dks",
+            "endpoint": "closed_set_exact_root_gallery",
+            "candidate_count": len(paper_root_ids),
+            "scorable": not reason,
+            "unscorable_reason": reason,
+            "correct": False,
+            "actual_rank": pd.NA,
+            "top3_correct": False,
+            "score": np.nan,
+            "margin": np.nan,
+            "estimator_provenance": (
+                "paper_eq2_spearman_dp_depth_alignment_stored_dks_not_fixed_hill"
+            ),
+        }
+        if not reason:
+            finite_order = np.asarray(
+                sorted(
+                    np.flatnonzero(np.isfinite(scores)),
+                    key=lambda index: (-float(scores[index]), paper_root_ids[index]),
+                ),
+                dtype=int,
+            )
+            ranked = np.asarray(paper_root_ids, dtype=object)[finite_order]
+            rank = int(np.flatnonzero(ranked == actual_root)[0]) + 1
+            best = int(finite_order[0])
+            second = int(finite_order[1]) if len(finite_order) > 1 else best
+            result.update(
+                {
+                    "predicted_root": paper_root_ids[best],
+                    "correct": bool(rank == 1),
+                    "actual_rank": rank,
+                    "top3_correct": bool(rank <= 3),
+                    "score": float(scores[best]),
+                    "margin": float(scores[best] - scores[second]),
+                }
+            )
+        rows.append(result)
+
+    predictions = pd.DataFrame(rows)
+    metrics = branch_metric_rows(predictions)
+    metrics["endpoint"] = "closed_set_exact_root_gallery"
+    metrics["n_population_roots"] = len(roots)
+    metrics["n_candidate_roots"] = len(candidate_roots)
+    metrics["root_profile_coverage"] = len(candidate_roots) / len(roots)
+    metrics["estimator_provenance"] = metrics["method"].map(
+        {
+            "exact_root_alpha_profile": (
+                "rolewise_interp32_rank_cosine_stored_dks_not_fixed_hill"
+            ),
+            "exact_root_paper_spearman_dks": (
+                "paper_eq2_spearman_dp_depth_alignment_stored_dks_not_fixed_hill"
+            ),
+        }
+    )
+
+    root_audit = []
+    for root, frame in population.groupby("component_root_model", sort=True):
+        root = str(root)
+        if root in development_profile_ids:
+            profile_source = "phase2"
+        elif root in external_profile_ids:
+            profile_source = "ablation"
+        else:
+            profile_source = ""
+        feature_available = (
+            root in development_feature_ids or root in external_feature_ids
+        )
+        root_audit.append(
+            {
+                "root_model": root,
+                "n_query_models": int(len(frame)),
+                "n_query_branches": int(frame["root_branch_model"].nunique()),
+                "phase2_feature_row_available": root in development_feature_ids,
+                "ablation_feature_row_available": root in external_feature_ids,
+                "root_alpha_profile_valid": root in embeddings,
+                "profile_source": profile_source,
+                "status": (
+                    "valid_exact_root_profile"
+                    if root in embeddings
+                    else "invalid_alpha_profile"
+                    if feature_available
+                    else "missing_htsr_artifact"
+                ),
+            }
+        )
+    return predictions, metrics, pd.DataFrame(root_audit)
+
+
+def evaluate_matched_branch_lineage(
+    population: pd.DataFrame,
+    embeddings: dict[str, np.ndarray],
+    candidate_roots: set[str],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    matched = population.loc[
+        population["component_root_model"].astype(str).isin(candidate_roots)
+        & population["model_id"].isin(embeddings)
+    ].copy()
+    predictions = _profile_centroid_predictions(matched, embeddings)
+    predictions["method"] = "matched_branch_alpha_profile"
+    predictions["endpoint"] = "branch_held_out_matched_closed_set_population"
+    metrics = branch_metric_rows(predictions)
+    metrics["endpoint"] = "branch_held_out_matched_closed_set_population"
+    metrics["n_population_roots"] = len(candidate_roots)
+    metrics["n_candidate_roots"] = len(candidate_roots)
+    metrics["root_profile_coverage"] = 1.0
+    metrics["estimator_provenance"] = (
+        "rolewise_interp32_rank_cosine_stored_dks_not_fixed_hill"
+    )
+    return predictions, metrics
+
+
+def branch_profile_duplicate_audit(
+    population: pd.DataFrame,
+    embeddings: dict[str, np.ndarray],
+) -> pd.DataFrame:
+    profiled = population.loc[population["model_id"].isin(embeddings)].copy()
+    profiled["profile_hash"] = [
+        hashlib.sha256(embeddings[model_id].tobytes()).hexdigest()
+        for model_id in profiled["model_id"]
+    ]
+    groups = profiled.groupby("profile_hash").agg(
+        n_models=("model_id", "size"),
+        n_branches=("root_branch_model", "nunique"),
+        n_folds=("branch_fold", "nunique"),
+    )
+    duplicates = groups.loc[groups["n_models"].gt(1)]
+    cross_branch = set(duplicates.loc[duplicates["n_branches"].gt(1)].index)
+    cross_fold = set(duplicates.loc[duplicates["n_folds"].gt(1)].index)
+    return pd.DataFrame(
+        [
+            {
+                "n_profiled_models": int(len(profiled)),
+                "n_duplicate_profile_groups": int(len(duplicates)),
+                "n_models_in_duplicate_profile_groups": int(
+                    duplicates["n_models"].sum()
+                ),
+                "n_cross_branch_duplicate_groups": int(len(cross_branch)),
+                "n_models_in_cross_branch_duplicate_groups": int(
+                    profiled["profile_hash"].isin(cross_branch).sum()
+                ),
+                "n_cross_fold_duplicate_groups": int(len(cross_fold)),
+                "n_models_in_cross_fold_duplicate_groups": int(
+                    profiled["profile_hash"].isin(cross_fold).sum()
+                ),
+                "interpretation": (
+                    "identical_derived_profiles_not_verified_identical_checkpoints"
+                ),
+            }
+        ]
+    )
+
+
+def lineage_metric_table(
+    census: pd.DataFrame,
+    strict_assignments: pd.DataFrame,
+    broad_assignments: pd.DataFrame,
+) -> pd.DataFrame:
+    rows = []
+    label_sources = (
+        ("manual_confirmed", "audited_base_family"),
+        ("conservative_corroborated", "conservative_metadata_family"),
+        ("atlas_clean_single_root", "atlas_clean_metadata_family"),
+        ("moderate_root_consensus", "moderate_metadata_family"),
+    )
+    for population_name, assignments, cluster_column in (
+        ("strict", strict_assignments, "cluster"),
+        ("broad", broad_assignments.rename(columns={"broad_cluster": "cluster"}), "cluster"),
+    ):
+        for label_source, label_column in label_sources:
+            scored = assignments.loc[:, ["model_id", cluster_column]].merge(
+                census.loc[:, ["model_id", label_column]],
+                on="model_id",
+                how="inner",
+                validate="one_to_one",
+            ).dropna(subset=[label_column])
+            if scored.empty:
+                continue
+            rows.append(
+                {
+                    "population": population_name,
+                    "label_source": label_source,
+                    "n_models": int(len(scored)),
+                    "n_families": int(scored[label_column].nunique()),
+                    "n_clusters": int(scored[cluster_column].nunique()),
+                    "ari": float(adjusted_rand_score(scored[label_column], scored[cluster_column])),
+                    "nmi": float(normalized_mutual_info_score(scored[label_column], scored[cluster_column])),
+                    "matched_family_recall": matched_family_recall(
+                        scored[label_column], scored[cluster_column]
+                    ),
+                    "evidence_role": (
+                        "manual_audit" if label_source == "manual_confirmed" else "metadata_derived"
+                    ),
+                }
+            )
+    return pd.DataFrame(rows)
 
 
 def main() -> None:
@@ -926,111 +1643,398 @@ def main() -> None:
     BOOTSTRAP_REPLICATES = int(settings["bootstrap_replicates"])
     SIGNFLIP_REPLICATES = int(settings["signflip_replicates"])
     MINIMUM_COMPONENTS = int(settings["minimum_components"])
+
     phase2_path = Path(str(provenance["sources"]["development_targets"]["path"]))
     ablation_path = Path(str(provenance["sources"]["external_targets"]["path"]))
+    overlap_path = ablation_path.parent / "ablation_overlap_audit.csv"
+    graph_path = Path(str(provenance["sources"]["graph"]["path"]))
+    labels_path = Path(str(provenance["sources"]["labels"]["path"]))
+
     manifest = pd.read_csv(RUN / "manifest.csv", low_memory=False)
-    dev_features = pd.read_csv(RUN / "feature_table.csv", low_memory=False)
-    ext_features = pd.read_csv(RUN / "external_feature_table.csv", low_memory=False)
-    dev_targets = pd.read_csv(RUN / "development_targets.csv", low_memory=False)
-    ext_targets = pd.read_csv(RUN / "external_targets.csv", low_memory=False)
-    frozen = pd.read_csv(RUN / "performance_predictions.csv", low_memory=False)
+    development_features = pd.read_csv(RUN / "feature_table.csv", low_memory=False)
+    external_features = pd.read_csv(RUN / "external_feature_table.csv", low_memory=False)
+    retained_modern = pd.read_csv(RUN / "development_targets.csv", low_memory=False)
+    strict_assignments = pd.read_csv(RUN / "lineage_cluster_assignments.csv")
     phase2 = pd.read_csv(phase2_path, low_memory=False)
-    phase2["model_id"] = phase2["model_id"].map(canonical)
-    phase2 = phase2.loc[phase2["model_id"].ne("")].drop_duplicates("model_id", keep=False)
-    assert phase2["model_id"].is_unique
     ablation = pd.read_csv(ablation_path, low_memory=False)
-    ablation["model_id"] = ablation["model_id"].map(canonical)
-    legacy_targets = build_legacy_targets(ablation)
+    overlap = pd.read_csv(overlap_path, low_memory=False)
+    labels = pd.read_csv(labels_path, low_memory=False)
+    for frame in (phase2, ablation, development_features, external_features):
+        frame["model_id"] = frame["model_id"].map(canonical)
+    if phase2["model_id"].duplicated().any() or ablation["model_id"].duplicated().any():
+        raise ValueError("source populations require unique model IDs")
 
-    external_cache = Path(str(provenance["cache"]["external"]))
-    requested_dev = set(dev_targets["model_id"].astype(str))
-    requested_ext = set(ext_targets["model_id"].astype(str)) | set(legacy_targets["model_id"].astype(str))
-    dev_ids, dev_embedding, dev_cache = alpha_embedding_cache(
+    targets = reconcile_targets(phase2, ablation, overlap, retained_modern)
+    graph = build_scaled_graph(phase2, ablation, labels, graph_path)
+    components = graph["components"]
+    branch_population = branch_lineage_population(
+        graph["branches"], development_features, strict_assignments
+    )
+
+    requested_development = set(
+        pd.concat(
+            [targets["modern"], targets["legacy"]], ignore_index=True, sort=False
+        ).loc[lambda frame: frame["source_population"].eq("phase2"), "model_id"]
+    )
+    lineage_root_ids = set(branch_population["component_root_model"].astype(str))
+    requested_development.update(branch_population["model_id"].astype(str))
+    requested_development.update(lineage_root_ids)
+    requested_external = set(
+        pd.concat(
+            [targets["modern"], targets["legacy"]], ignore_index=True, sort=False
+        ).loc[lambda frame: frame["source_population"].eq("ablation"), "model_id"]
+    )
+    development_ids, development_embedding, development_cache = alpha_embedding_cache(
         RUN / "alpha_trajectories.csv",
-        requested_dev,
+        requested_development,
         source_digest=str(provenance["sources"]["development_stats"]["sha256"]),
-        source_name="phase2",
+        source_name="phase2_full_targets_and_lineage_roots",
     )
-    ext_ids, ext_embedding, ext_cache = alpha_embedding_cache(
+    requested_external.update(lineage_root_ids.difference(development_ids))
+    external_cache = Path(str(provenance["cache"]["external"]))
+    external_ids, external_embedding, external_cache_path = alpha_embedding_cache(
         external_cache / "alpha_trajectories.csv",
-        requested_ext,
+        requested_external,
         source_digest=str(provenance["sources"]["external_stats"]["sha256"]),
-        source_name="ablation",
+        source_name="ablation_full_targets_and_missing_lineage_roots",
     )
-    embeddings = embedding_lookup(dev_ids, dev_embedding, ext_ids, ext_embedding)
-
-    census, broad_clusters, broad_cluster_metrics = broad_lineage(phase2, dev_features, manifest)
-
-    dev, ext = build_exact_modern_populations(
-        manifest, dev_features, ext_features, dev_targets, ext_targets, frozen
+    embeddings = embedding_lookup(
+        development_ids, development_embedding, external_ids, external_embedding
     )
-    broad_graph_columns = [
-        "model_id", "ancestry_component", "component_provenance", "component_edge_count"
+    closed_root_ids = lineage_root_ids.intersection(embeddings)
+    closed_query_ids = set(
+        branch_population.loc[
+            branch_population["component_root_model"].astype(str).isin(closed_root_ids)
+            & branch_population["model_id"].isin(embeddings),
+            "model_id",
+        ].astype(str)
+    )
+    (
+        paper_query_ids,
+        paper_root_ids,
+        paper_similarity,
+        paper_similarity_cache,
+    ) = paper_root_similarity_cache(
+        (RUN / "alpha_trajectories.csv", external_cache / "alpha_trajectories.csv"),
+        closed_query_ids,
+        closed_root_ids,
+        source_digests=(
+            str(provenance["sources"]["development_stats"]["sha256"]),
+            str(provenance["sources"]["external_stats"]["sha256"]),
+        ),
+    )
+
+    census, broad_clusters, broad_cluster_metrics = broad_lineage(
+        phase2, development_features, manifest
+    )
+    branch_columns = [
+        "model_id",
+        "ancestry_component",
+        "component_root_model",
+        "component_exclusion_reason",
+        "root_branch_model",
+        "path_depth",
     ]
-    broad_dev_targets = dev_targets.merge(
-        manifest.loc[:, broad_graph_columns], on="model_id", how="left", validate="one_to_one"
+    census = census.drop(
+        columns=[
+            "ancestry_component",
+            "component_root_model",
+            "component_exclusion_reason",
+        ],
+        errors="ignore",
+    ).merge(
+        graph["branches"].loc[:, branch_columns],
+        on="model_id",
+        how="left",
+        validate="one_to_one",
     )
-    broad_dev_targets["source"] = "phase2"
-    broad_ext_targets = ext_targets.merge(
-        manifest.loc[:, broad_graph_columns], on="model_id", how="left", validate="one_to_one"
+    for key, columns in (
+        (
+            "conservative",
+            ["model_id", "conservative_metadata_family", "conservative_family_conflict"],
+        ),
+        (
+            "atlas_clean",
+            ["model_id", "atlas_clean_metadata_family", "atlas_clean_family_conflict"],
+        ),
+        (
+            "moderate",
+            [
+                "model_id",
+                "consensus_root_model",
+                "moderate_metadata_family",
+                "moderate_family_conflict",
+            ],
+        ),
+    ):
+        census = census.merge(
+            graph[key].loc[:, columns],
+            on="model_id",
+            how="left",
+            validate="one_to_one",
+        )
+    source_audit = graph["source_audit"].loc[
+        graph["source_audit"]["source"].eq("phase2")
+    ].rename(
+        columns={
+            "status": "direct_source_status",
+            "reason": "direct_source_reason",
+            "already_in_atlas": "direct_source_in_atlas",
+            "source_model": "direct_source_model",
+            "relation": "direct_source_relation",
+        }
     )
-    broad_ext_targets["source"] = "ablation"
-    modern_broad = pd.concat([broad_dev_targets, broad_ext_targets], ignore_index=True)
-    modern_grouped_alpha = alpha_oof(
-        modern_broad, embeddings, MODERN_TARGETS,
-        method="alpha_profile_k5_component_distinct",
+    census = census.merge(
+        source_audit.loc[
+            :,
+            [
+                "model_id",
+                "direct_source_status",
+                "direct_source_reason",
+                "direct_source_in_atlas",
+                "direct_source_model",
+                "direct_source_relation",
+            ],
+        ],
+        on="model_id",
+        how="left",
+        validate="one_to_one",
     )
-    modern_grouped_metrics = metric_rows(
-        modern_grouped_alpha, scope="modern_grouped_alpha_broad"
+    raw_flags = phase2.set_index("model_id")["known_lineage_flag"]
+    census["raw_source_metadata_flag"] = census["model_id"].map(raw_flags).fillna(False)
+    census["metadata_tier"] = np.select(
+        [
+            census["label_status"].eq("confirmed"),
+            census["conservative_metadata_family"].notna(),
+            census["moderate_metadata_family"].notna(),
+        ],
+        ["manual_confirmed", "conservative_corroborated", "moderate_root_consensus"],
+        default="unresolved",
     )
-    modern_paper = paper_random_splits(modern_broad, embeddings, MODERN_TARGETS)
 
-    source_predictions, source_metrics, source_increments = source_heldout_modern(
-        dev, ext, manifest, frozen, embeddings, broad_dev_targets
+    lineage_cluster_metrics = lineage_metric_table(
+        census, strict_assignments, broad_clusters
+    )
+    branch_predictions, branch_metrics, branch_folds = evaluate_branch_lineage(
+        branch_population, embeddings
+    )
+    closed_root_predictions, closed_root_metrics, closed_root_audit = (
+        evaluate_exact_root_lineage(
+            branch_population,
+            development_features,
+            external_features,
+            set(development_ids),
+            set(external_ids),
+            embeddings,
+            paper_query_ids,
+            paper_root_ids,
+            paper_similarity,
+        )
+    )
+    matched_branch_predictions, matched_branch_metrics = evaluate_matched_branch_lineage(
+        branch_population, embeddings, set(paper_root_ids)
+    )
+    duplicate_profile_audit = branch_profile_duplicate_audit(
+        branch_population, embeddings
     )
 
-    pooled = pd.concat([dev, ext], ignore_index=True, sort=False)
-    pooled = pooled.loc[pooled["model_id"].isin(embeddings)].reset_index(drop=True)
-    pooled_ridge, _, _ = evaluate_grouped_ridge(
-        pooled,
+    all_features = pd.concat(
+        [development_features, external_features], ignore_index=True, sort=False
+    )
+    if all_features["model_id"].duplicated().any():
+        raise ValueError("development and ablation feature populations overlap")
+    modern_population = performance_population(
+        all_features,
+        targets["modern"],
+        components,
+        min_role_coverage=float(settings["min_role_coverage"]),
+    )
+    legacy_population = performance_population(
+        all_features,
+        targets["legacy"],
+        components,
+        min_role_coverage=float(settings["min_role_coverage"]),
+    )
+    modern_paired = modern_population.loc[
+        modern_population["model_id"].isin(embeddings)
+    ].reset_index(drop=True)
+    legacy_paired = legacy_population.loc[
+        legacy_population["model_id"].isin(embeddings)
+    ].reset_index(drop=True)
+    (
+        modern_predictions,
+        modern_metrics,
+        modern_increments,
+        modern_fit_audit,
+    ) = grouped_performance(
+        modern_paired,
+        embeddings,
+        MODERN_TARGETS,
+        scope="modern_full_reconciled_grouped_paired",
+    )
+    (
+        legacy_predictions,
+        legacy_metrics,
+        legacy_increments,
+        legacy_fit_audit,
+    ) = grouped_performance(
+        legacy_paired,
+        embeddings,
+        LEGACY_TARGETS,
+        scope="legacy_full_reconciled_grouped_paired",
+    )
+    modern_full_ridge, modern_full_ridge_metrics, modern_full_ridge_audit = evaluate_grouped_ridge(
+        modern_population,
         target="modern_average",
         outer_splits=OUTER_FOLDS,
         inner_splits=INNER_FOLDS,
         ridge_alphas=RIDGE_ALPHAS,
         random_state=SEED,
     )
-    pooled_alpha = alpha_on_ridge_folds(
-        pooled, pooled_ridge, embeddings, target="modern_average"
-    )
-    pooled_hybrid = residual_hybrid_on_ridge_folds(
-        pooled, pooled_ridge, embeddings, target="modern_average"
-    )
-    pooled_predictions = pd.concat(
-        [pooled_ridge, pooled_alpha, pooled_hybrid], ignore_index=True
-    )
-    pooled_metrics = metric_rows(pooled_predictions, scope="modern_pooled_grouped_paired")
-    pooled_increments = increment_rows(
-        pooled_predictions,
-        baseline="M+S+H",
-        candidates=(
-            "alpha_profile_k5_component_distinct",
-            "M+S+H+alpha_residual_k5_nested",
-        ),
-        secondary_targets=(),
-        scope="modern_pooled_grouped_paired",
+    legacy_full_ridge, legacy_full_ridge_metrics, legacy_full_ridge_audit = evaluate_grouped_ridge(
+        legacy_population,
+        target="legacy_average",
+        outer_splits=OUTER_FOLDS,
+        inner_splits=INNER_FOLDS,
+        ridge_alphas=RIDGE_ALPHAS,
+        random_state=SEED,
     )
 
-    (
-        legacy_paper,
-        legacy_grouped,
-        legacy_grouped_metrics,
-        legacy_paired,
-        legacy_paired_metrics,
-        legacy_increments,
-    ) = legacy_study(legacy_targets, ext_features, manifest, embeddings)
+    modern_random_frame = targets["modern"].merge(
+        components.loc[:, ["model_id", "ancestry_component"]],
+        on="model_id",
+        how="left",
+        validate="one_to_one",
+    )
+    legacy_random_frame = targets["legacy"].merge(
+        components.loc[:, ["model_id", "ancestry_component"]],
+        on="model_id",
+        how="left",
+        validate="one_to_one",
+    )
+    modern_paper = paper_random_splits(
+        modern_random_frame, embeddings, MODERN_TARGETS
+    )
+    legacy_paper = paper_random_splits(
+        legacy_random_frame, embeddings, LEGACY_TARGETS
+    )
+    source_predictions, source_metrics, source_increments = source_heldout_modern_full(
+        modern_paired, embeddings
+    )
+
+    confirmed = labels.loc[
+        labels["label_status"].eq("confirmed")
+        & labels["audited_base_family"].notna()
+    ].copy()
+    confirmed["model_id"] = confirmed["model_id"].map(canonical)
+    feature_ids = set(development_features["model_id"].astype(str))
+    strict_ids = set(strict_assignments["model_id"].astype(str))
+    broad_ids = set(broad_clusters["model_id"].astype(str))
+
+    def lineage_count(column: str, eligible: set[str] | None = None) -> int:
+        mask = census[column].notna()
+        if eligible is not None:
+            mask &= census["model_id"].isin(eligible)
+        return int(mask.sum())
+
+    feature_model_ids = set(all_features["model_id"].astype(str))
+    phase2_edge_audit = graph["source_audit"].loc[
+        graph["source_audit"]["source"].eq("phase2")
+    ]
+    accepted_phase2_edges = phase2_edge_audit.loc[
+        phase2_edge_audit["status"].eq("accepted")
+    ]
+
+    def edge_reason_count(reason: str) -> int:
+        return int(phase2_edge_audit["reason"].eq(reason).sum())
+
+    counts = {
+        "phase2_census": int(len(census)),
+        "phase2_htsr_artifacts": int(census["htsr_artifact_available"].sum()),
+        "phase2_strict_lineage": int(census["strict_cluster"].notna().sum()),
+        "phase2_broad_lineage": int(census["broad_cluster"].notna().sum()),
+        "lineage_manual_reviewed": int(len(labels)),
+        "lineage_manual_confirmed": int(len(confirmed)),
+        "lineage_manual_phase2": int(confirmed["model_id"].isin(set(phase2["model_id"])).sum()),
+        "lineage_manual_with_htsr": int(confirmed["model_id"].isin(feature_ids).sum()),
+        "lineage_manual_strict": int(confirmed["model_id"].isin(strict_ids).sum()),
+        "lineage_raw_source_metadata_flag": int(census["raw_source_metadata_flag"].sum()),
+        "lineage_direct_edges_accepted": int(len(accepted_phase2_edges)),
+        "lineage_direct_edges_in_atlas": int(accepted_phase2_edges["already_in_atlas"].sum()),
+        "lineage_direct_edges_added": int((~accepted_phase2_edges["already_in_atlas"]).sum()),
+        "lineage_direct_self_references": edge_reason_count("self_reference"),
+        "lineage_direct_displayed_self_merges": edge_reason_count("displayed_self_merge"),
+        "lineage_direct_weak_relations": edge_reason_count("relation_not_strong"),
+        "lineage_direct_invalid_parents": edge_reason_count("invalid_parent_id"),
+        "lineage_direct_unrepresented_parents": edge_reason_count("parent_not_represented"),
+        "lineage_conservative_all": lineage_count("conservative_metadata_family"),
+        "lineage_conservative_with_htsr": lineage_count(
+            "conservative_metadata_family", feature_ids
+        ),
+        "lineage_conservative_broad": lineage_count(
+            "conservative_metadata_family", broad_ids
+        ),
+        "lineage_conservative_strict": lineage_count(
+            "conservative_metadata_family", strict_ids
+        ),
+        "lineage_atlas_clean_all": lineage_count("atlas_clean_metadata_family"),
+        "lineage_atlas_clean_strict": lineage_count(
+            "atlas_clean_metadata_family", strict_ids
+        ),
+        "lineage_moderate_all": lineage_count("moderate_metadata_family"),
+        "lineage_moderate_with_htsr": lineage_count("moderate_metadata_family", feature_ids),
+        "lineage_moderate_broad": lineage_count("moderate_metadata_family", broad_ids),
+        "lineage_moderate_strict": lineage_count("moderate_metadata_family", strict_ids),
+        "lineage_branch_models": int(branch_predictions["model_id"].nunique()),
+        "lineage_branch_alpha_models": int(
+            branch_predictions.loc[
+                branch_predictions["method"].eq("alpha_profile")
+                & branch_predictions["scorable"].eq(True),
+                "model_id",
+            ].nunique()
+        ),
+        "lineage_branch_roots": int(branch_predictions["actual_root"].nunique()),
+        "lineage_branch_groups": int(branch_predictions["root_branch_model"].nunique()),
+        "lineage_closed_root_models": int(
+            closed_root_predictions.loc[
+                closed_root_predictions["scorable"].eq(True), "model_id"
+            ].nunique()
+        ),
+        "lineage_closed_root_candidates": int(
+            closed_root_audit["root_alpha_profile_valid"].sum()
+        ),
+        "lineage_closed_root_population_roots": int(len(closed_root_audit)),
+        "lineage_matched_branch_models": int(
+            matched_branch_predictions.loc[
+                matched_branch_predictions["scorable"].eq(True), "model_id"
+            ].nunique()
+        ),
+        "lineage_cross_fold_duplicate_profile_models": int(
+            duplicate_profile_audit.at[
+                0, "n_models_in_cross_fold_duplicate_groups"
+            ]
+        ),
+        "lineage_family_suggestions": int(census["family_abstained"].eq(False).sum()),
+        "modern_complete_targets": int(len(targets["modern"])),
+        "modern_phase2_targets": int(targets["modern"]["source_population"].eq("phase2").sum()),
+        "modern_ablation_targets": int(targets["modern"]["source_population"].eq("ablation").sum()),
+        "modern_targets_with_htsr": int(targets["modern"]["model_id"].isin(feature_model_ids).sum()),
+        "modern_alpha_profiles": int(targets["modern"]["model_id"].isin(embeddings).sum()),
+        "modern_grouped_models": int(len(modern_population)),
+        "modern_paired_models": int(len(modern_paired)),
+        "modern_paired_components": int(modern_paired["ancestry_component"].nunique()),
+        "legacy_complete_targets": int(len(targets["legacy"])),
+        "legacy_phase2_targets": int(targets["legacy"]["source_population"].eq("phase2").sum()),
+        "legacy_ablation_targets": int(targets["legacy"]["source_population"].eq("ablation").sum()),
+        "legacy_targets_with_htsr": int(targets["legacy"]["model_id"].isin(feature_model_ids).sum()),
+        "legacy_alpha_profiles": int(targets["legacy"]["model_id"].isin(embeddings).sum()),
+        "legacy_grouped_models": int(len(legacy_population)),
+        "legacy_paired_models": int(len(legacy_paired)),
+        "legacy_paired_components": int(legacy_paired["ancestry_component"].nunique()),
+    }
 
     run_payload = {
-        "method": "htsr_scaleup_rolewise_interp32_rank_cosine_k5_v2",
+        "method": "htsr_full_scale_reconciled_v6",
         "seed": SEED,
         "grid_size": GRID_SIZE,
         "group_knn_k": GROUP_K,
@@ -1043,98 +2047,191 @@ def main() -> None:
         "minimum_components": MINIMUM_COMPONENTS,
         "lineage_feature_coverage": BROAD_COVERAGE,
         "lineage_clusterer": f"kmeans_n_init{KMEANS_N_INIT}_sqrt_half",
-        "silhouette_sample": SILHOUETTE_SAMPLE,
-        "family_router": "spectral_shape_full_gallery_manual_triage_only",
+        "lineage_branch_rule": "first_child_below_clean_root_balanced_5fold",
+        "lineage_closed_root_rule": "direct_exact_root_gallery_no_fitting",
+        "lineage_root_identity": "canonical_repository_id_not_verified_revision_hash",
+        "lineage_closed_root_similarity": (
+            "paper_eq2_spearman_dp_stored_dks_primary_plus_interp32_secondary"
+        ),
+        "lineage_graph_rule": "atlas_plus_represented_strong_local_sources",
+        "target_reconciliation": "exact_id_key_or_sha_then_identity_or_aggregate_v1",
+        "script_sha256": sha256_file(__file__),
         "development_stats_sha256": provenance["sources"]["development_stats"]["sha256"],
         "external_stats_sha256": provenance["sources"]["external_stats"]["sha256"],
         "development_target_sha256": provenance["sources"]["development_targets"]["sha256"],
         "external_target_sha256": provenance["sources"]["external_targets"]["sha256"],
+        "overlap_audit_sha256": sha256_file(overlap_path),
+        "graph_sha256": provenance["sources"]["graph"]["sha256"],
+        "labels_sha256": provenance["sources"]["labels"]["sha256"],
+        "augmented_graph_sha256": str(components["component_graph_fingerprint"].iloc[0]),
     }
     run_id = "scaleup_" + hashlib.sha256(
-        json.dumps(run_payload, sort_keys=True).encode("utf-8")
+        json.dumps(run_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()[:20]
     destination = SCALE_ROOT / "runs" / run_id
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
         raise RuntimeError(f"scale-up run already exists: {destination}")
     temporary = Path(tempfile.mkdtemp(prefix=f".{run_id}.tmp-", dir=destination.parent))
+
     tables = {
         "population_ledger.csv": census,
+        "lineage_source_audit.csv": graph["source_audit"],
         "lineage_broad_cluster_assignments.csv": broad_clusters,
         "lineage_broad_cluster_metrics.csv": broad_cluster_metrics,
+        "lineage_cluster_label_metrics.csv": lineage_cluster_metrics,
+        "lineage_branch_predictions.csv": branch_predictions,
+        "lineage_branch_metrics.csv": branch_metrics,
+        "lineage_branch_fold_audit.csv": branch_folds,
+        "lineage_closed_root_predictions.csv": closed_root_predictions,
+        "lineage_closed_root_metrics.csv": closed_root_metrics,
+        "lineage_closed_root_audit.csv": closed_root_audit,
+        "lineage_matched_branch_predictions.csv": matched_branch_predictions,
+        "lineage_matched_branch_metrics.csv": matched_branch_metrics,
+        "lineage_branch_profile_duplicate_audit.csv": duplicate_profile_audit,
+        "performance_modern_targets.csv": targets["modern"],
+        "performance_legacy_targets.csv": targets["legacy"],
+        "performance_target_reconciliation_audit.csv": targets["audit"],
+        "performance_target_exclusions.csv": targets["exclusions"],
         "modern_paper_like_summary.csv": modern_paper,
-        "modern_grouped_alpha_predictions.csv": modern_grouped_alpha,
-        "modern_grouped_alpha_metrics.csv": modern_grouped_metrics,
+        "modern_grouped_alpha_predictions.csv": modern_predictions.loc[
+            modern_predictions["feature_block"].eq("alpha_profile_k5_component_distinct")
+        ],
+        "modern_grouped_alpha_metrics.csv": modern_metrics.loc[
+            modern_metrics["feature_block"].eq("alpha_profile_k5_component_distinct")
+        ],
         "modern_source_heldout_predictions.csv": source_predictions,
         "modern_source_heldout_metrics.csv": source_metrics,
         "modern_source_heldout_increments.csv": source_increments,
-        "modern_pooled_predictions.csv": pooled_predictions,
-        "modern_pooled_metrics.csv": pooled_metrics,
-        "modern_pooled_increments.csv": pooled_increments,
+        "modern_pooled_predictions.csv": modern_predictions,
+        "modern_pooled_metrics.csv": modern_metrics,
+        "modern_pooled_increments.csv": modern_increments,
+        "modern_full_ridge_predictions.csv": modern_full_ridge,
+        "modern_full_ridge_metrics.csv": modern_full_ridge_metrics,
         "legacy_paper_like_summary.csv": legacy_paper,
-        "legacy_grouped_alpha_predictions.csv": legacy_grouped,
-        "legacy_grouped_alpha_metrics.csv": legacy_grouped_metrics,
-        "legacy_paired_predictions.csv": legacy_paired,
-        "legacy_paired_metrics.csv": legacy_paired_metrics,
+        "legacy_grouped_alpha_predictions.csv": legacy_predictions.loc[
+            legacy_predictions["feature_block"].eq("alpha_profile_k5_component_distinct")
+        ],
+        "legacy_grouped_alpha_metrics.csv": legacy_metrics.loc[
+            legacy_metrics["feature_block"].eq("alpha_profile_k5_component_distinct")
+        ],
+        "legacy_paired_predictions.csv": legacy_predictions,
+        "legacy_paired_metrics.csv": legacy_metrics,
         "legacy_increments.csv": legacy_increments,
+        "legacy_full_ridge_predictions.csv": legacy_full_ridge,
+        "legacy_full_ridge_metrics.csv": legacy_full_ridge_metrics,
+        "performance_fit_audit.csv": pd.concat(
+            [
+                modern_fit_audit.assign(generation="modern", population="paired"),
+                legacy_fit_audit.assign(generation="legacy", population="paired"),
+                pd.DataFrame(modern_full_ridge_audit).assign(
+                    generation="modern", population="all_grouped"
+                ),
+                pd.DataFrame(legacy_full_ridge_audit).assign(
+                    generation="legacy", population="all_grouped"
+                ),
+            ],
+            ignore_index=True,
+            sort=False,
+        ),
     }
     for filename, frame in tables.items():
         frame.to_csv(temporary / filename, index=False)
-    counts = {
-        "phase2_census": len(census),
-        "phase2_htsr_artifacts": int(census["htsr_artifact_available"].sum()),
-        "phase2_strict_lineage": int(census["strict_cluster"].notna().sum()),
-        "phase2_broad_lineage": int(census["broad_cluster"].notna().sum()),
-        "modern_alpha_profiles": len(set(modern_broad["model_id"]) & set(embeddings)),
-        "modern_grouped_models": modern_grouped_alpha["model_id"].nunique(),
-        "modern_paired_development": len(dev),
-        "modern_external_ridge_models": len(ext),
-        "modern_external_alpha_paired_models": int(ext["model_id"].isin(embeddings).sum()),
-        "legacy_alpha_complete": int(
-            legacy_targets.loc[legacy_targets.loc[:, LEGACY_TARGETS].notna().all(axis=1), "model_id"].isin(embeddings).sum()
-        ),
-        "legacy_grouped_models": legacy_grouped["model_id"].nunique(),
-        "legacy_paired_models_min": int(
-            legacy_paired.groupby("target")["model_id"].nunique().min()
-        ),
-        "legacy_paired_models_max": int(
-            legacy_paired.groupby("target")["model_id"].nunique().max()
-        ),
-    }
+
     metadata = {
         "run_id": run_id,
         "config": run_payload,
         "counts": counts,
-        "caches": {"phase2_alpha": str(dev_cache), "ablation_alpha": str(ext_cache)},
+        "caches": {
+            "phase2_alpha": str(development_cache),
+            "ablation_alpha": str(external_cache_path),
+            "closed_root_paper_similarity": str(paper_similarity_cache),
+        },
+        "sources": {
+            "phase2": {"path": str(phase2_path), "sha256": run_payload["development_target_sha256"]},
+            "ablation": {"path": str(ablation_path), "sha256": run_payload["external_target_sha256"]},
+            "overlap_audit": {"path": str(overlap_path), "sha256": run_payload["overlap_audit_sha256"]},
+            "graph": {"path": str(graph_path), "sha256": run_payload["graph_sha256"]},
+            "labels": {"path": str(labels_path), "sha256": run_payload["labels_sha256"]},
+        },
         "evidence_roles": {
+            "manual_lineage": "manual_audit",
+            "propagated_lineage": "metadata_derived",
+            "branch_lineage": "metadata_graph_agreement",
+            "closed_root_lineage": "metadata_graph_agreement",
+            "modern_pooled": "internal_ancestry_grouped",
             "modern_source_heldout": EXTERNAL_EVIDENCE_ROLE,
-            "modern_pooled": "internal_grouped",
-            "legacy": "internal_grouped_and_interpolation_diagnostic",
+            "paper_like_random_split": "interpolation_diagnostic",
         },
     }
     (temporary / "metadata.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+
+    best_branch = branch_metrics.loc[
+        branch_metrics["method"].eq("alpha_profile")
+    ].iloc[0]
+    exact_root = closed_root_metrics.loc[
+        closed_root_metrics["method"].eq("exact_root_paper_spearman_dks")
+    ].iloc[0]
+    exact_root_fast = closed_root_metrics.loc[
+        closed_root_metrics["method"].eq("exact_root_alpha_profile")
+    ].iloc[0]
+    matched_branch = matched_branch_metrics.iloc[0]
+    modern_average = modern_metrics.loc[
+        modern_metrics["target"].eq("modern_average")
+    ].set_index("feature_block")
+    legacy_average = legacy_metrics.loc[
+        legacy_metrics["target"].eq("legacy_average")
+    ].set_index("feature_block")
+    modern_difference = modern_increments.loc[
+        modern_increments["target"].eq("modern_average")
+        & modern_increments["baseline"].eq("M+S+H")
+        & modern_increments["candidate"].eq(
+            "alpha_profile_k5_component_distinct"
+        )
+    ].iloc[0]
+    legacy_difference = legacy_increments.loc[
+        legacy_increments["target"].eq("legacy_average")
+        & legacy_increments["baseline"].eq("M+S+H")
+        & legacy_increments["candidate"].eq(
+            "alpha_profile_k5_component_distinct"
+        )
+    ].iloc[0]
     report = [
-        "# HTSR Scale-Up Study",
+        "# HTSR full scale study",
         "",
         f"Run: `{run_id}`",
         "",
-        "## Population",
+        "## Main findings",
         "",
-        *[f"- {key}: {value}" for key, value in counts.items()],
+        f"- The 174-model result is the last step of a manual funnel: {counts['lineage_manual_reviewed']:,} reviewed, {counts['lineage_manual_confirmed']:,} confirmed, {counts['lineage_manual_phase2']:,} present in Phase 2, {counts['lineage_manual_with_htsr']:,} with HTSR, and {counts['lineage_manual_strict']:,} passing strict feature rules.",
+        f"- Phase 2 contains {counts['lineage_raw_source_metadata_flag']:,} raw lineage flags. The audit accepts {counts['lineage_direct_edges_accepted']:,} strong represented parent links: {counts['lineage_direct_edges_in_atlas']:,} already match Model Atlas and {counts['lineage_direct_edges_added']:,} are represented local additions.",
+        f"- Directed label propagation gives {counts['lineage_conservative_strict']:,} corroborated strict family labels and {counts['lineage_moderate_strict']:,} clean root-consensus strict labels. These are metadata-derived, not independent truth.",
+        f"- Closed-set exact-root attribution compares each descendant directly with every valid candidate root profile; it does not fit descendant centers. Valid profiles exist for {int(exact_root['n_candidate_roots']):,} of {int(exact_root['n_population_roots']):,} roots, covering {int(exact_root['n_models']):,} of {int(exact_root['n_eligible']):,} eligible descendants. Paper-style DKS Spearman reaches {exact_root['root_macro_top1']:.3f} root-balanced top-1 ({exact_root['micro_top1']:.3f} overall top-1); the scalable interpolated profile reaches {exact_root_fast['root_macro_top1']:.3f}.",
+        f"- On the same {int(matched_branch['n_models']):,} models and {int(matched_branch['n_roots']):,} roots as the closed-set gallery, holding complete branches out gives {matched_branch['root_macro_top1']:.3f} root-balanced top-1 with the scalable alpha profile. This matched comparison isolates evaluation design better than comparing different root populations.",
+        f"- Branch-held-out root prediction has {counts['lineage_branch_models']:,} eligible strict models in {int(best_branch['n_roots']):,} roots. Alpha profiles score {int(best_branch['n_models']):,} of them and reach {best_branch['root_macro_top1']:.3f} root-balanced top-1 and {best_branch['top3_accuracy']:.3f} top-3 agreement.",
+        f"- Modern target funnel: {counts['modern_phase2_targets']:,} Phase 2 + {counts['modern_ablation_targets']:,} ablation = {counts['modern_complete_targets']:,} complete targets; {counts['modern_targets_with_htsr']:,} have HTSR, {counts['modern_alpha_profiles']:,} have valid alpha profiles, and {counts['modern_paired_models']:,} in {counts['modern_paired_components']:,} ancestry/checkpoint groups enter the paired comparison.",
+        f"- Legacy target funnel: {counts['legacy_phase2_targets']:,} Phase 2 + {counts['legacy_ablation_targets']:,} ablation = {counts['legacy_complete_targets']:,} complete targets; {counts['legacy_targets_with_htsr']:,} have HTSR, {counts['legacy_alpha_profiles']:,} have valid alpha profiles, and {counts['legacy_paired_models']:,} in {counts['legacy_paired_components']:,} groups enter the paired comparison.",
+        f"- Modern average: alpha-profile MAE {modern_average.at['alpha_profile_k5_component_distinct', 'component_weighted_mae']:.3f} versus Ridge M+S+H {modern_average.at['M+S+H', 'component_weighted_mae']:.3f}; difference {modern_difference['delta_mae']:.3f}, 95% interval [{modern_difference['ci_low']:.3f}, {modern_difference['ci_high']:.3f}], p={modern_difference['p_value_raw']:.3f}.",
+        f"- Legacy average: alpha-profile MAE {legacy_average.at['alpha_profile_k5_component_distinct', 'component_weighted_mae']:.3f} versus Ridge M+S+H {legacy_average.at['M+S+H', 'component_weighted_mae']:.3f}; difference {legacy_difference['delta_mae']:.3f}, 95% interval [{legacy_difference['ci_low']:.3f}, {legacy_difference['ci_high']:.3f}], p={legacy_difference['p_value_raw']:.4f}.",
         "",
-        "## Contracts",
+        "## Interpretation limits",
         "",
-        "- Modern and legacy benchmark generations are analyzed separately.",
-        "- Grouped results hold graph-derived ancestry components out intact.",
-        "- Paper-like random splits are interpolation diagnostics only.",
-        "- Strict lineage is the quality-controlled descriptive reference.",
-        "- Broad clusters are population sensitivity only; family routes are manual-triage candidates.",
-        f"- Source-heldout evidence role: {EXTERNAL_EVIDENCE_ROLE}.",
+        "- Manual labels, graph-derived labels, and spectral predictions remain separate columns.",
+        "- A graph result measures agreement with repository metadata. It does not independently prove training ancestry.",
+        "- The exact-root endpoint is closed-set and covers only roots with valid analyzed profiles. Its score is not an estimate for missing roots or for unseen families.",
+        "- An exact graph root means an exact canonical repository ID in the graph. A revision hash was not available for every root, so this is not checkpoint-level identity verification.",
+        f"- {int(duplicate_profile_audit.at[0, 'n_models_in_cross_fold_duplicate_groups']):,} branch-test models share an identical derived alpha profile with a model in another fold. This is not proof of identical weights, but it can make branch prediction easier and remains a sensitivity-analysis target.",
+        "- Merges, conflicting roots, cycles, malformed parent IDs, and unrepresented parents are not forced into one family.",
+        "- Modern and legacy leaderboard generations are never pooled into one target.",
+        "- Main performance estimates hold complete graph groups and shared checkpoint hashes out together.",
+        "- Random 50/50 results are retained only to compare with the paper's easier interpolation setting.",
+        f"- Source-held-out ablation results are `{EXTERNAL_EVIDENCE_ROLE}` because that collection was previously used during method development.",
     ]
     (temporary / "report.md").write_text("\n".join(report) + "\n", encoding="utf-8")
     os.rename(temporary, destination)
+    write_artifact_manifest(destination, run_id=run_id)
     print(json.dumps({"run": str(destination), "counts": counts}, indent=2))
 
 

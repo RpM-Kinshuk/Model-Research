@@ -102,6 +102,7 @@ def test_add_lineage_flags_assigns_lineage_and_eval_status():
         [
             {"model_id": "org/known", "source_model": "base/model", "Average ⬆️": 42.0},
             {"model_id": "org/unknown", "source_model": "unknown", "Average ⬆️": None},
+            {"model_id": "org/self", "source_model": "org/self", "Average ⬆️": 1.0},
         ]
     )
     flagged = add_lineage_flags(frame)
@@ -109,6 +110,7 @@ def test_add_lineage_flags_assigns_lineage_and_eval_status():
     assert flagged.loc[flagged["model_id"] == "org/known", "eval_status"].item() == "eval_present"
     assert flagged.loc[flagged["model_id"] == "org/unknown", "lineage_status"].item() == "unknown"
     assert flagged.loc[flagged["model_id"] == "org/unknown", "eval_status"].item() == "eval_missing"
+    assert flagged.loc[flagged["model_id"] == "org/self", "lineage_status"].item() == "unknown"
 
 
 def test_classify_primary_type_uses_content_hints_when_relation_is_ambiguous():

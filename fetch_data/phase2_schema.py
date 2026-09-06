@@ -241,7 +241,15 @@ def load_atlas_candidates(atlas_json_path: Path) -> pd.DataFrame:
 def add_lineage_flags(frame: pd.DataFrame) -> pd.DataFrame:
     result = frame.copy()
     source = result.get("source_model", pd.Series(index=result.index, dtype="object")).fillna("").astype(str).str.strip()
-    known_lineage = ~source.str.lower().isin(UNKNOWN_LINEAGE_VALUES)
+    model = result.get("model_id", pd.Series(index=result.index, dtype="object")).map(
+        normalize_repo_id
+    )
+    normalized_source = source.map(normalize_repo_id)
+    known_lineage = (
+        ~source.str.lower().isin(UNKNOWN_LINEAGE_VALUES)
+        & normalized_source.notna()
+        & ~normalized_source.str.casefold().eq(model.str.casefold())
+    )
     result["known_lineage_flag"] = known_lineage
     result["lineage_status"] = known_lineage.map({True: "known", False: "unknown"})
     if "Average ⬆️" in result.columns:

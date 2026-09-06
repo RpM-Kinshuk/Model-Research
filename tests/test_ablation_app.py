@@ -16,6 +16,7 @@ from alpha_cluster_dashboard.ablation_app import (
     _frozen_run_state_token,
     _category_color_map,
     _chart_theme_tokens,
+    _cluster_center_models,
     _cluster_galaxy_layout,
     _color_options,
     _dashboard_summary_cards,
@@ -153,15 +154,11 @@ def _scaleup_outputs(tmp_path: Path) -> ScaleupOutputs:
     population = pd.DataFrame(
         {
             "model_id": ["org/model-0", "org/model-1", "org/new-model"],
-            "htsr_artifact_available": [True, True, False],
-            "strict_cluster": pd.Series([4, 5, pd.NA], dtype="Int64"),
-            "broad_cluster": pd.Series([2, 3, pd.NA], dtype="Int64"),
-            "predicted_family": ["root/a", "root/b", pd.NA],
-            "lineage_evidence_status": [
-                "strict_qc_clustered",
-                "strict_qc_clustered",
-                "missing_htsr_artifact",
-            ],
+            "profile_hash": ["hash-a", "hash-b", pd.NA],
+            "predicted_cluster": pd.Series([4, 5, pd.NA], dtype="Int64"),
+            "spectral_medoid_model": ["org/medoid-a", "org/medoid-b", pd.NA],
+            "nearest_neighbors": ["org/model-1", "org/model-0", ""],
+            "htsr_profile_available": [True, True, False],
         }
     )
     predictions = pd.DataFrame(
@@ -169,7 +166,7 @@ def _scaleup_outputs(tmp_path: Path) -> ScaleupOutputs:
             "model_id": ["org/model-0", "org/model-1"],
             "display_name": ["org/model-0", "org/model-1"],
             "target": ["modern_average", "modern_average"],
-            "feature_block": ["alpha_profile_k5_component_distinct"] * 2,
+            "feature_block": ["alpha_profile_knn3"] * 2,
             "actual": [20.0, 25.0],
             "prediction": [21.0, 24.5],
             "absolute_error": [1.0, 0.5],
@@ -178,27 +175,40 @@ def _scaleup_outputs(tmp_path: Path) -> ScaleupOutputs:
     )
     return ScaleupOutputs(
         run_dir=tmp_path / "scaleup_run",
-        metadata={"run_id": "scaleup_run"},
+        metadata={
+            "run_id": "scaleup_run",
+            "method_boundary": {"metadata_role": "post_freeze_validation_only"},
+        },
         counts={
-            "phase2_census": 3,
-            "phase2_htsr_artifacts": 2,
-            "phase2_strict_lineage": 2,
+            "source_models": 3,
+            "profiled_models": 2,
+            "unlabelled_clusters": 2,
         },
         population=population,
         predictions={"modern_average": predictions},
         performance={
             "modern_average": {
                 "target": "modern_average",
-                "group_weighted_mae": 0.75,
+                "model_weighted_mae": 0.75,
+                "baseline_mae": 1.15,
                 "spearman": 1.0,
                 "delta_mae": -0.4,
-                "ci_low": -0.7,
-                "ci_high": -0.1,
                 "n_models": 2,
-                "n_components": 2,
+                "n_profile_groups": 2,
+                "cluster_holdout_mae": 1.4,
+                "cluster_holdout_spearman": 0.5,
             }
         },
-        broad_cluster_metrics=pd.DataFrame(),
+        lineage_assignments=population.loc[population["predicted_cluster"].notna()].copy(),
+        lineage_internal_metrics=pd.DataFrame(),
+        lineage_cluster_selection=pd.DataFrame(),
+        lineage_validation_metrics=pd.DataFrame(),
+        lineage_gallery_metrics=pd.DataFrame(),
+        performance_metrics=pd.DataFrame(),
+        performance_paper_summary=pd.DataFrame(),
+        performance_leakage_audit=pd.DataFrame(),
+        performance_cluster_holdout_metrics=pd.DataFrame(),
+        performance_target_audit=pd.DataFrame(),
         report="# Scale-up\n",
     )
 
@@ -210,6 +220,7 @@ def test_live_dashboard_entrypoint_loads_frozen_outputs_without_fitting_cache() 
     assert "default_study_run()" in source
     assert "default_scaleup_run()" in source
     assert "_cached_scaleup_outputs" in source
+    assert "if not configured_path and not configured_scaleup" in source
     assert "load_or_build_dashboard_cache" not in source
     assert "source_fingerprint" not in source
     assert "Rendered points" not in source
@@ -250,7 +261,7 @@ def test_frozen_study_adapter_exposes_all_rows_and_oof_predictions(tmp_path: Pat
     assert int(cache.cluster_summary["size"].sum()) == 9
 
 
-def test_scaleup_adapter_uses_full_ledger_strict_clusters_and_alpha_predictions(
+def test_scaleup_adapter_uses_weight_only_clusters_medoids_and_alpha_predictions(
     tmp_path: Path,
 ) -> None:
     cache = _dashboard_cache_from_scaleup(
@@ -260,21 +271,28 @@ def test_scaleup_adapter_uses_full_ledger_strict_clusters_and_alpha_predictions(
 
     assert len(cache.metadata) == 3
     assert cache.metadata["cluster"].tolist() == [4, 5, pd.NA]
-    assert cache.metadata["broad_cluster"].tolist() == [2, 3, pd.NA]
+    assert cache.metadata["Cluster center model"].tolist() == [
+        "org/medoid-a",
+        "org/medoid-b",
+        "unassigned",
+    ]
+    assert "coarse_family" not in cache.metadata.columns
+    assert "audited_base_family" not in cache.metadata.columns
     assert set(cache.predictions) == {"modern_average"}
     assert cache.metadata["modern_average"].tolist()[:2] == [20.0, 25.0]
     assert int(cache.cluster_summary["size"].sum()) == 2
 
 
-def test_scaleup_performance_values_report_direct_alpha_result(tmp_path: Path) -> None:
+def test_scaleup_performance_values_report_weight_only_and_stress_results(tmp_path: Path) -> None:
     values = _scaleup_performance_target_values(
         _scaleup_outputs(tmp_path), "modern_average"
     )
 
-    assert values["group_weighted_mae"] == 0.75
-    assert values["htsr_delta_mae"] == -0.4
-    assert values["htsr_ci_low"] == -0.7
-    assert values["htsr_ci_high"] == -0.1
+    assert values["model_weighted_mae"] == 0.75
+    assert values["baseline_mae"] == 1.15
+    assert values["delta_mae"] == -0.4
+    assert values["cluster_holdout_mae"] == 1.4
+    assert values["n_profile_groups"] == 2
     assert values["n_models"] == 2
 
 
@@ -543,6 +561,20 @@ def test_display_columns_make_predicted_cluster_the_first_color_option():
     assert frame["Predicted cluster"].tolist()[:3] == ["C00", "C01", "C02"]
     assert "Cluster center model" in frame.columns
     assert _color_options(frame, target="Average")[0] == "Cluster center model"
+
+
+def test_cluster_center_uses_spectral_medoid_not_performance_metadata():
+    frame = pd.DataFrame(
+        {
+            "display_name": ["org/a", "org/b", "org/c"],
+            "cluster": [2, 2, 2],
+            "spectral_medoid_model": ["org/b", "org/b", "org/b"],
+            "Average prediction": [0.0, 100.0, 0.0],
+            "#Params (B)": [1.0, 100.0, 1.0],
+        }
+    )
+
+    assert _cluster_center_models(frame, target="Average") == {2: "org/b"}
 
 
 def test_panel_options_are_minimal_analysis_views():

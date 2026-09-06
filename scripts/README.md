@@ -2,25 +2,34 @@
 
 ## Supported
 
+- `htsr_weight_only_study.py`: primary metadata-isolated study. It fits clusters
+  on complete seven-role summaries, adds partial summaries only after a masking
+  check, routes queries against a separately supplied base gallery, and predicts
+  benchmark scores from three comparable training models. Descriptive metadata
+  is loaded only after predictions are frozen.
 - `build_htsr_study.sh`: canonical HTSR v4 build using the frozen protocol and a
-  persistent, source-fingerprinted cache. Set `DEVELOPMENT_STATS` and
-  `EXTERNAL_STATS` to select metric collections. Performance evaluation includes
-  grouped 5-fold CV and a 20-repeat ancestry-disjoint 70/30 sensitivity.
+  persistent cache keyed by source content. Set `DEVELOPMENT_STATS` and
+  `EXTERNAL_STATS` to select metric collections.
 - `htsr_combined_study.py`: lower-level CLI with explicit source, cache, output,
   and protocol paths.
-- `htsr_scaleup_study.py`: evaluates a retained run across its full Phase-2 and
-  ablation populations. Inputs and statistical settings come from the retained
-  run's provenance; generated outputs are content-addressed under
-  `research_runs/htsr_scaleup/`.
+- `htsr_scaleup_study.py`: prepares the larger Phase 2 and ablation populations
+  and validation tables consumed by the metadata-isolated study. Its old
+  older lineage experiments are compatibility outputs, not the primary method.
 - `streamlit run app.py`: read-only dashboard with automatic newest-complete local
-  defaults. Override the retained base with `HTSR_STUDY_RUN` and the optional
-  large-scale overlay with `HTSR_SCALEUP_RUN`, or edit either path in the sidebar.
+  defaults. Override run paths with the environment variables shown in the app's
+  sidebar.
 
-Run the scale-up against any retained study directory:
+Run the current study from retained feature and validation inputs:
 
 ```bash
-python scripts/htsr_scaleup_study.py --study-run "$HTSR_STUDY_RUN"
+python scripts/htsr_weight_only_study.py \
+  --study-run research_runs/htsr_study/runs/htsr_7f739673cde388be2d4c \
+  --validation-run research_runs/htsr_scaleup/runs/scaleup_05d8fb3a8bea1b39f713
 ```
+
+Outputs are content-addressed under `research_runs/htsr_weight_only/runs/`.
+Profile caches persist under `research_runs/htsr_weight_only/cache/` and are
+reused until source content or method settings change.
 
 ## Compatibility
 

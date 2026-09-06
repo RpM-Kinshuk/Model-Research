@@ -20,6 +20,7 @@ from fetch_data.phase2_schema import (
     seed_analysis_status,
     select_to_target,
 )
+from fetch_data.leaderboard_supplement import LEADERBOARD_SCORE_COLUMNS
 
 
 def _write_parquet_if_possible(frame: pd.DataFrame, path: Path) -> None:
@@ -89,6 +90,16 @@ def build_phase2_outputs(
         how="left",
         suffixes=("", "_lb"),
     )
+    for column in LEADERBOARD_SCORE_COLUMNS:
+        leaderboard_column = f"{column}_lb"
+        if leaderboard_column not in combined.columns:
+            continue
+        if column not in combined.columns:
+            combined[column] = combined[leaderboard_column]
+        else:
+            combined[column] = combined[column].combine_first(
+                combined[leaderboard_column]
+            )
     if "model_id_lb" in combined.columns:
         combined["model_id"] = combined["model_id"].fillna(combined["model_id_lb"])
     combined["source_model"] = combined["source_model"].fillna("")

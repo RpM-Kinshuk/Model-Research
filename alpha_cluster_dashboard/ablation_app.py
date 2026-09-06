@@ -453,16 +453,22 @@ def _frozen_cluster_summary(metadata: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for cluster, group in metadata.groupby("cluster", sort=True):
         families = (
-            group[family_column].fillna("unknown").astype(str).value_counts()
+            group[family_column].dropna().astype(str).value_counts()
             if family_column is not None
-            else pd.Series({"unknown": len(group)})
+            else pd.Series(dtype=int)
         )
         rows.append(
             {
                 "cluster": int(cluster),
                 "size": int(len(group)),
-                "dominant_family": str(families.index[0]),
-                "dominant_family_share": float(families.iloc[0] / len(group)),
+                "dominant_family": (
+                    str(families.index[0]) if not families.empty else "not loaded"
+                ),
+                "dominant_family_share": (
+                    float(families.iloc[0] / families.sum())
+                    if not families.empty
+                    else np.nan
+                ),
                 "mean_layers": (
                     float(pd.to_numeric(group[layer_column], errors="coerce").mean())
                     if layer_column is not None
@@ -568,45 +574,19 @@ def _dashboard_cache_from_study(outputs: StudyOutputs) -> DashboardCache:
 
 
 def _dashboard_cache_from_scaleup(
-    outputs: StudyOutputs,
+    outputs: StudyOutputs | None,
     scaleup: ScaleupOutputs,
 ) -> DashboardCache:
-    """Overlay a validated retained run with read-only scale-up results."""
+    """Adapt the metadata-isolated weight-only run to the 2D dashboard."""
 
     metadata = scaleup.population.copy().reset_index(drop=True)
-    base = outputs.atlas.copy()
-    extra_columns = [
-        column
-        for column in base.columns
-        if column == "model_id" or column not in metadata.columns
-    ]
-    metadata = metadata.merge(
-        base.loc[:, extra_columns],
-        on="model_id",
-        how="left",
-        validate="one_to_one",
-    )
     metadata["display_name"] = metadata["model_id"].astype(str)
     metadata["cluster"] = pd.to_numeric(
-        metadata["strict_cluster"], errors="coerce"
+        metadata["predicted_cluster"], errors="coerce"
     ).astype("Int64")
-    predicted_family = metadata.get(
-        "predicted_family", pd.Series(pd.NA, index=metadata.index)
+    metadata["Cluster center model"] = (
+        metadata["spectral_medoid_model"].astype("string").fillna("unassigned")
     )
-    audited_family = metadata.get(
-        "audited_base_family", pd.Series(pd.NA, index=metadata.index)
-    )
-    metadata["coarse_family"] = predicted_family.fillna(audited_family).fillna(
-        "unknown"
-    )
-    metadata["Predicted family"] = predicted_family.fillna("unavailable").astype(str)
-    if "lineage_evidence_status" in metadata.columns:
-        metadata["Lineage evidence"] = (
-            metadata["lineage_evidence_status"]
-            .astype("string")
-            .str.replace("_", " ", regex=False)
-            .fillna("unavailable")
-        )
 
     predictions = {
         target: table.copy().reset_index(drop=True)
@@ -633,51 +613,72 @@ def _dashboard_cache_from_scaleup(
         manifest={
             "provenance": dict(scaleup.metadata),
             "summary": dict(scaleup.counts),
-            "base_run": str(outputs.run_dir),
+            **({"retained_fallback": str(outputs.run_dir)} if outputs is not None else {}),
         },
     )
 
 
 def _study_summary_cards(
-    outputs: StudyOutputs,
+    outputs: StudyOutputs | None,
     scaleup: ScaleupOutputs | None = None,
 ) -> list[dict[str, str]]:
     if scaleup is not None:
         modern = scaleup.performance.get("modern_average", {})
-        legacy = scaleup.performance.get("legacy_average", {})
+        gallery_row = (
+            scaleup.lineage_gallery_metrics.iloc[0]
+            if len(scaleup.lineage_gallery_metrics) == 1
+            else None
+        )
 
         def count(key: str) -> str:
             value = scaleup.counts.get(key)
             return f"{int(value):,}" if value is not None else "n/a"
 
         modern_models = modern.get("n_models")
-        modern_components = modern.get("n_components")
+        modern_groups = modern.get("n_profile_groups")
         modern_scope = (
-            f"{int(modern_models):,} / {int(modern_components):,}"
-            if modern_models is not None and modern_components is not None
-            else "internal grouped"
+            f"{int(modern_models):,} models / {int(modern_groups):,} profile groups"
+            if modern_models is not None and modern_groups is not None
+            else "profile-grouped folds"
         )
         return [
-            {"label": "Census models", "value": count("phase2_census")},
-            {"label": "HTSR artifacts", "value": count("phase2_htsr_artifacts")},
-            {"label": "Strict clustered", "value": count("phase2_strict_lineage")},
+            {"label": "Source models", "value": count("source_models")},
+            {
+                "label": "Lineage models",
+                "value": count("lineage_models"),
+                "delta": (
+                    f"{count('strict_seven_role_models')} core + "
+                    f"{count('lineage_extension_models')} calibrated extensions"
+                ),
+            },
+            {
+                "label": "Supplied-gallery top-1",
+                "value": (
+                    _format_percent(gallery_row["root_macro_top1"])
+                    if gallery_row is not None
+                    else "n/a"
+                ),
+                "delta": (
+                    f"{int(gallery_row['n_scored_queries']):,} labelled queries / "
+                    f"{int(gallery_row['n_profiled_roots']):,} profiled roots"
+                    if gallery_row is not None
+                    else "post-freeze validation"
+                ),
+            },
             {
                 "label": "Modern MAE",
-                "value": _format_number(modern.get("group_weighted_mae")),
+                "value": _format_number(modern.get("model_weighted_mae")),
                 "delta": modern_scope,
             },
             {
-                "label": "Modern dMAE",
-                "value": _format_number(modern.get("delta_mae")),
-                "delta": "direct alpha vs M+S+H",
-            },
-            {
-                "label": "Legacy dMAE",
-                "value": _format_number(legacy.get("delta_mae")),
-                "delta": "direct alpha vs M+S+H",
+                "label": "Cluster-holdout MAE",
+                "value": _format_number(modern.get("cluster_holdout_mae")),
+                "delta": "harder spectral extrapolation test",
             },
         ]
 
+    if outputs is None:
+        return []
     lineage = outputs.lineage_summary
     performance = outputs.performance_summary
     family_count = lineage.get("n_families")
@@ -788,6 +789,7 @@ def _edge_color_for_key(value: object) -> str:
 
 
 def _cluster_center_models(frame: pd.DataFrame, target: str | None = None) -> dict[int, str]:
+    del target
     if frame.empty or "cluster" not in frame.columns:
         return {}
     clusters = pd.to_numeric(frame["cluster"], errors="coerce")
@@ -795,36 +797,28 @@ def _cluster_center_models(frame: pd.DataFrame, target: str | None = None) -> di
     frame["cluster"] = clusters.loc[frame.index].astype(int)
     if frame.empty:
         return {}
-    prediction_column = f"{target} prediction" if target else ""
-    error_column = f"{target} absolute_error" if target else ""
-    numeric_candidates = [
-        column
-        for column in [prediction_column, target or "", error_column, "overall_log_alpha", "#Params (B)", "num_layers"]
-        if column and column in frame.columns
-    ]
+    center_column = next(
+        (
+            column
+            for column in ("spectral_medoid_model", "Cluster center model")
+            if column in frame.columns
+        ),
+        None,
+    )
     result: dict[int, str] = {}
     for cluster, group in frame.groupby("cluster", sort=True):
         if group.empty:
             continue
-        if numeric_candidates:
-            scores = pd.Series(0.0, index=group.index)
-            for column in numeric_candidates:
-                values = pd.to_numeric(group[column], errors="coerce")
-                if not values.notna().any():
-                    continue
-                center = float(values.median())
-                spread = float(values.quantile(0.75) - values.quantile(0.25))
-                spread = max(spread, float(values.std(skipna=True) or 0.0), 1e-6)
-                scores = scores + ((values.fillna(center) - center).abs() / spread)
-            if error_column in group.columns:
-                errors = pd.to_numeric(group[error_column], errors="coerce")
-                if errors.notna().any():
-                    err_spread = max(float(errors.quantile(0.75) - errors.quantile(0.25)), 1e-6)
-                    scores = scores + 0.35 * (errors.fillna(float(errors.median())) / err_spread)
-            chosen_index = scores.sort_values(kind="mergesort").index[0]
+        centers = (
+            group[center_column].dropna().astype(str).loc[lambda values: values.ne("")]
+            if center_column is not None
+            else pd.Series(dtype=str)
+        )
+        if not centers.empty:
+            counts = centers.value_counts()
+            result[int(cluster)] = sorted(counts[counts.eq(counts.max())].index)[0]
         else:
-            chosen_index = group.index[0]
-        result[int(cluster)] = str(group.loc[chosen_index, "display_name"])
+            result[int(cluster)] = sorted(group["display_name"].astype(str))[0]
     return result
 
 
@@ -901,6 +895,10 @@ def _dynamic_hover_columns(frame: pd.DataFrame, target: str | None) -> list[str]
         "Type",
         "Weight type",
         "#Params (B)",
+        "assignment_status",
+        "usable_role_count",
+        "usable_roles",
+        "nearest_shared_roles",
     ]
     if target:
         preferred.extend([target, f"{target} prediction", f"{target} absolute_error"])
@@ -1162,6 +1160,7 @@ def _settled_cluster_centers(summary: pd.DataFrame, iterations: int = 180) -> di
     }
 
 
+@st.cache_data(show_spinner=False, persist="disk", max_entries=32)
 def _cluster_galaxy_layout(frame: pd.DataFrame, target: str | None = None) -> pd.DataFrame:
     if frame.empty:
         return frame.copy()
@@ -1207,28 +1206,34 @@ def _cluster_galaxy_layout(frame: pd.DataFrame, target: str | None = None) -> pd
         arm_count = int(np.clip(round(np.sqrt(max(n, 1))), 3, 18))
         if n < 12:
             arm_count = int(np.clip(round(np.sqrt(max(n, 1))), 2, 5))
+        names = group["display_name"].astype(str).to_numpy()
+        group_indices = group.index.to_numpy()
+        score_values = score_rank.to_numpy(dtype=float)
         ordering = (
             pd.DataFrame(
                 {
-                    "row_index": group.index,
-                    "score": score_rank,
-                    "jitter": [_deterministic_jitter(name, scale=1.0) for name in group["display_name"]],
+                    "position": np.arange(n, dtype=int),
+                    "row_index": group_indices,
+                    "score": score_values,
+                    "jitter": [
+                        _deterministic_jitter(name, scale=1.0) for name in names
+                    ],
                 }
             )
             .sort_values(["jitter", "score", "row_index"])
             .reset_index(drop=True)
         )
-        row_to_arm: dict[object, int] = {}
-        row_to_arm_order: dict[object, int] = {}
+        assigned_arms = np.zeros(n, dtype=int)
+        assigned_orders = np.zeros(n, dtype=int)
         arm_loads = np.zeros(arm_count, dtype=int)
         arm_capacity = int(np.ceil(max(n, 1) / arm_count))
-        for order, row_index in enumerate(ordering["row_index"].tolist()):
-            name = str(layout.loc[row_index, "display_name"]) if "display_name" in layout.columns else str(row_index)
+        for position in ordering["position"].to_numpy(dtype=int):
+            name = names[position]
             preferred = int(hashlib.sha1(f"{cluster}:{name}:arm".encode("utf-8")).hexdigest()[:8], 16) % arm_count
             candidates = [(preferred + offset) % arm_count for offset in range(arm_count)]
             arm = min(candidates, key=lambda candidate: (arm_loads[candidate] >= arm_capacity, arm_loads[candidate], candidate))
-            row_to_arm[row_index] = arm
-            row_to_arm_order[row_index] = int(arm_loads[arm])
+            assigned_arms[position] = arm
+            assigned_orders[position] = int(arm_loads[arm])
             arm_loads[arm] += 1
 
         if error_column in group.columns:
@@ -1238,42 +1243,81 @@ def _cluster_galaxy_layout(frame: pd.DataFrame, target: str | None = None) -> pd
             error = pd.Series(0.0, index=group.index)
             error_scale = 1.0
 
-        for row_index, row in group.iterrows():
-            name = row.get("display_name", row_index)
-            arm = row_to_arm.get(row_index, 0)
-            arm_order = row_to_arm_order.get(row_index, 0)
-            rank = float(score_rank.loc[row_index])
-            residual_push = 0.055 * min(float(error.loc[row_index]) / error_scale, 1.5)
-            angular_jitter = _deterministic_jitter(name, scale=0.52)
-            radial_jitter = _deterministic_jitter(f"{name}:radius", scale=0.09)
-            arm_phase = _deterministic_jitter(f"{cluster}:{arm}:phase", scale=0.34)
-            arm_curve = 1.04 + _deterministic_jitter(f"{cluster}:{arm}:curve", scale=0.32)
-            branch = int(hashlib.sha1(f"{name}:branch".encode("utf-8")).hexdigest()[:2], 16) % 3 - 1
-            arm_size = max(int(arm_loads[arm]), 1)
-            arm_depth = (arm_order + 1.0) / (arm_size + 1.0)
-            radial_unit = _deterministic_unit(f"{cluster}:{name}:radial")
-            core_fraction = 0.30 if n < 24 else 0.24
-            if radial_unit < core_fraction:
-                core_unit = radial_unit / max(core_fraction, 1e-6)
-                radius = cluster_radius * (0.035 + 0.17 * np.sqrt(core_unit)) + radial_jitter * 0.35
-                angle_jitter = angular_jitter
-                branch_depth = arm_depth
-            else:
-                branch_unit = (radial_unit - core_fraction) / max(1.0 - core_fraction, 1e-6)
-                branch_depth = 0.70 * arm_depth + 0.30 * branch_unit
-                radius = cluster_radius * (0.16 + 0.78 * (branch_depth**1.12)) + residual_push + radial_jitter
-                angle_jitter = angular_jitter * 0.52
-            spiral_turn = arm_curve * (0.18 + 0.88 * branch_depth) + 0.18 * (rank - 0.5)
-            angle = 2.0 * np.pi * (arm / arm_count) + arm_phase + spiral_turn + branch * 0.16 * branch_depth + angle_jitter
-            radius = max(radius, cluster_radius * 0.025)
-            x_values.loc[row_index] = cx + radius * np.cos(angle)
-            y_values.loc[row_index] = cy + radius * np.sin(angle)
-            center_x.loc[row_index] = cx
-            center_y.loc[row_index] = cy
-            radius_values.loc[row_index] = radius
-            arm_values.loc[row_index] = arm
-            arm_order_values.loc[row_index] = arm_order
-            angle_values.loc[row_index] = angle
+        error_values = error.to_numpy(dtype=float)
+        residual_push = 0.055 * np.minimum(error_values / error_scale, 1.5)
+        angular_jitter = np.asarray(
+            [_deterministic_jitter(name, scale=0.52) for name in names],
+            dtype=float,
+        )
+        radial_jitter = np.asarray(
+            [_deterministic_jitter(f"{name}:radius", scale=0.09) for name in names],
+            dtype=float,
+        )
+        branch = np.asarray(
+            [
+                int(hashlib.sha1(f"{name}:branch".encode("utf-8")).hexdigest()[:2], 16) % 3 - 1
+                for name in names
+            ],
+            dtype=int,
+        )
+        radial_unit = np.asarray(
+            [_deterministic_unit(f"{cluster}:{name}:radial") for name in names],
+            dtype=float,
+        )
+        phase_by_arm = np.asarray(
+            [
+                _deterministic_jitter(f"{cluster}:{arm}:phase", scale=0.34)
+                for arm in range(arm_count)
+            ],
+            dtype=float,
+        )
+        curve_by_arm = np.asarray(
+            [
+                1.04 + _deterministic_jitter(f"{cluster}:{arm}:curve", scale=0.32)
+                for arm in range(arm_count)
+            ],
+            dtype=float,
+        )
+        arm_depth = (assigned_orders + 1.0) / (arm_loads[assigned_arms] + 1.0)
+        core_fraction = 0.30 if n < 24 else 0.24
+        core_mask = radial_unit < core_fraction
+        branch_unit = np.clip(
+            (radial_unit - core_fraction) / max(1.0 - core_fraction, 1e-6),
+            0.0,
+            1.0,
+        )
+        branch_depth = 0.70 * arm_depth + 0.30 * branch_unit
+        radius = (
+            cluster_radius * (0.16 + 0.78 * np.power(branch_depth, 1.12))
+            + residual_push
+            + radial_jitter
+        )
+        angle_jitter = angular_jitter * 0.52
+        if core_mask.any():
+            core_unit = radial_unit[core_mask] / max(core_fraction, 1e-6)
+            radius[core_mask] = (
+                cluster_radius * (0.035 + 0.17 * np.sqrt(core_unit))
+                + radial_jitter[core_mask] * 0.35
+            )
+            angle_jitter[core_mask] = angular_jitter[core_mask]
+            branch_depth[core_mask] = arm_depth[core_mask]
+        spiral_turn = curve_by_arm[assigned_arms] * (0.18 + 0.88 * branch_depth) + 0.18 * (score_values - 0.5)
+        angle = (
+            2.0 * np.pi * (assigned_arms / arm_count)
+            + phase_by_arm[assigned_arms]
+            + spiral_turn
+            + branch * 0.16 * branch_depth
+            + angle_jitter
+        )
+        radius = np.maximum(radius, cluster_radius * 0.025)
+        x_values.loc[group_indices] = cx + radius * np.cos(angle)
+        y_values.loc[group_indices] = cy + radius * np.sin(angle)
+        center_x.loc[group_indices] = cx
+        center_y.loc[group_indices] = cy
+        radius_values.loc[group_indices] = radius
+        arm_values.loc[group_indices] = assigned_arms
+        arm_order_values.loc[group_indices] = assigned_orders
+        angle_values.loc[group_indices] = angle
 
     layout["galaxy_x"] = x_values
     layout["galaxy_y"] = y_values
@@ -1684,6 +1728,7 @@ def _dashboard_summary_cards(cache: DashboardCache, frame: pd.DataFrame, target:
     metrics = _prediction_quality_metrics(predictions)
     metadata = cache.metadata if hasattr(cache, "metadata") else pd.DataFrame()
     family_series = frame.get("coarse_family", pd.Series(dtype=object))
+    has_family_labels = "coarse_family" in frame.columns and family_series.notna().any()
     cluster_series = metadata.get("cluster", pd.Series(dtype=object))
     return [
         {
@@ -1698,8 +1743,12 @@ def _dashboard_summary_cards(cache: DashboardCache, frame: pd.DataFrame, target:
         },
         {
             "label": "Families",
-            "value": f"{family_series.dropna().astype(str).nunique():,}",
-            "delta": "filtered view",
+            "value": (
+                f"{family_series.dropna().astype(str).nunique():,}"
+                if has_family_labels
+                else "not loaded"
+            ),
+            "delta": "filtered view" if has_family_labels else "kept in validation tables",
         },
         {
             "label": "Family purity",
@@ -2040,13 +2089,16 @@ def _scaleup_performance_target_values(
 ) -> dict[str, float | None]:
     record = scaleup.performance.get(target, {})
     return {
-        "group_weighted_mae": _finite_number(record.get("group_weighted_mae")),
+        "model_weighted_mae": _finite_number(record.get("model_weighted_mae")),
+        "baseline_mae": _finite_number(record.get("baseline_mae")),
         "spearman": _finite_number(record.get("spearman")),
-        "htsr_delta_mae": _finite_number(record.get("delta_mae")),
-        "htsr_ci_low": _finite_number(record.get("ci_low")),
-        "htsr_ci_high": _finite_number(record.get("ci_high")),
+        "delta_mae": _finite_number(record.get("delta_mae")),
         "n_models": _finite_number(record.get("n_models")),
-        "n_components": _finite_number(record.get("n_components")),
+        "n_profile_groups": _finite_number(record.get("n_profile_groups")),
+        "cluster_holdout_mae": _finite_number(record.get("cluster_holdout_mae")),
+        "cluster_holdout_spearman": _finite_number(
+            record.get("cluster_holdout_spearman")
+        ),
     }
 
 
@@ -2060,11 +2112,14 @@ def _external_status_for_target(outputs: StudyOutputs, target: str) -> str:
 
 
 def _render_frozen_prediction(
-    outputs: StudyOutputs,
+    outputs: StudyOutputs | None,
     cache: DashboardCache,
     target: str,
     scaleup: ScaleupOutputs | None = None,
 ) -> None:
+    if outputs is None and scaleup is None:
+        st.info("No performance run is available.")
+        return
     run_id = str(
         scaleup.metadata.get("run_id", scaleup.run_dir.name)
         if scaleup is not None
@@ -2076,54 +2131,81 @@ def _render_frozen_prediction(
         if scaleup is not None
         else _performance_target_values(outputs, target)
     )
-    interval = (
-        f"[{_format_number(values['htsr_ci_low'])}, {_format_number(values['htsr_ci_high'])}]"
-        if values["htsr_ci_low"] is not None and values["htsr_ci_high"] is not None
-        else "n/a"
-    )
     model_count = int(values["n_models"]) if values["n_models"] is not None else len(predictions)
-    component_count = (
-        f"{int(values['n_components']):,}"
-        if values["n_components"] is not None
-        else "n/a"
-    )
-    primary_status = "direct alpha vs M+S+H" if scaleup is not None else (
-        "claim passed"
-        if outputs.performance_summary.get("primary_passed") is True
-        else "claim failed"
-    )
-    if target != "modern_average" and scaleup is None:
-        primary_status = "descriptive"
-    _render_cards(
-        [
-            {
-                "label": "OOF models / groups",
-                "value": f"{model_count:,} / {component_count}",
-            },
-            {"label": "Grouped MAE", "value": _format_number(values["group_weighted_mae"])},
-            {"label": "Model Spearman", "value": _format_number(values["spearman"])},
-            {
-                "label": "dMAE vs baseline" if scaleup is not None else "HTSR dMAE",
-                "value": _format_number(values["htsr_delta_mae"]),
-                "delta": primary_status,
-            },
-            {"label": "95% interval", "value": interval},
-            {
-                "label": "Evidence",
-                "value": (
-                    "Internal grouped"
-                    if scaleup is not None
-                    else _external_status_for_target(outputs, target)
-                ),
-            },
-        ]
-    )
     if scaleup is not None:
+        group_count = (
+            f"{int(values['n_profile_groups']):,}"
+            if values["n_profile_groups"] is not None
+            else "n/a"
+        )
+        _render_cards(
+            [
+                {
+                    "label": "OOF models / profile groups",
+                    "value": f"{model_count:,} / {group_count}",
+                },
+                {
+                    "label": "Profile-grouped MAE",
+                    "value": _format_number(values["model_weighted_mae"]),
+                },
+                {
+                    "label": "Spearman",
+                    "value": _format_number(values["spearman"]),
+                },
+                {
+                    "label": "Training-mean MAE",
+                    "value": _format_number(values["baseline_mae"]),
+                    "delta": f"HTSR change {_format_number(values['delta_mae'])}",
+                },
+                {
+                    "label": "Cluster-holdout MAE",
+                    "value": _format_number(values["cluster_holdout_mae"]),
+                },
+                {
+                    "label": "Cluster-holdout Spearman",
+                    "value": _format_number(values["cluster_holdout_spearman"]),
+                },
+            ]
+        )
         st.caption(
-            "Scale-up out-of-fold direct alpha-profile predictions. MAE is ancestry-component "
-            "weighted; Spearman is model-level descriptive."
+            "Predictions use alpha profiles and training target scores only. Identical profiles "
+            "stay in the same fold. The cluster-held-out result is the harder extrapolation test."
         )
     else:
+        interval = (
+            f"[{_format_number(values['htsr_ci_low'])}, {_format_number(values['htsr_ci_high'])}]"
+            if values["htsr_ci_low"] is not None and values["htsr_ci_high"] is not None
+            else "n/a"
+        )
+        component_count = (
+            f"{int(values['n_components']):,}"
+            if values["n_components"] is not None
+            else "n/a"
+        )
+        primary_status = (
+            "claim passed"
+            if outputs.performance_summary.get("primary_passed") is True
+            else "claim failed"
+        )
+        if target != "modern_average":
+            primary_status = "descriptive"
+        _render_cards(
+            [
+                {
+                    "label": "OOF models / groups",
+                    "value": f"{model_count:,} / {component_count}",
+                },
+                {"label": "Grouped MAE", "value": _format_number(values["group_weighted_mae"])},
+                {"label": "Model Spearman", "value": _format_number(values["spearman"])},
+                {
+                    "label": "HTSR dMAE",
+                    "value": _format_number(values["htsr_delta_mae"]),
+                    "delta": primary_status,
+                },
+                {"label": "95% interval", "value": interval},
+                {"label": "Evidence", "value": _external_status_for_target(outputs, target)},
+            ]
+        )
         st.caption(
             "Frozen development out-of-fold M+S+H predictions. MAE is component "
             "weighted; Spearman is model-level descriptive."
@@ -2195,58 +2277,150 @@ def _render_frozen_prediction(
 
 
 def _render_frozen_lineage(
-    outputs: StudyOutputs,
+    outputs: StudyOutputs | None,
     frame: pd.DataFrame,
     *,
+    scaleup: ScaleupOutputs | None = None,
     color_by: str,
     size_by: str,
     edge_density: str,
     gesture_zoom: bool,
     atlas_zoom: float,
 ) -> None:
-    run_id = str(outputs.provenance.get("run_id", outputs.run_dir.name))
-    open_set = outputs.lineage_metrics.get("open_set", outputs.lineage_metrics.get("open_set_metrics", {}))
-    coverage = _frozen_metric(open_set, "scorable_coverage")
-    family_count = outputs.lineage_summary.get("n_families")
-    query_count = outputs.lineage_summary.get("n_queries")
-    lineage_status = (
-        "Inferential"
-        if outputs.lineage_summary.get("inferential") is True
-        else "Descriptive"
+    if outputs is None and scaleup is None:
+        st.info("No lineage run is available.")
+        return
+    run_id = str(
+        scaleup.metadata.get("run_id", scaleup.run_dir.name)
+        if scaleup is not None
+        else outputs.provenance.get("run_id", outputs.run_dir.name)
     )
-    _render_cards(
-        [
-            {"label": "Root top-1", "value": _format_percent(outputs.lineage_summary.get("root_macro_top1"))},
-            {
-                "label": "Known-family top-1",
-                "value": _format_percent(
-                    outputs.lineage_summary.get("observed_family_top1")
-                ),
-                "delta": "descriptive",
-            },
-            {"label": "Unknown AUROC", "value": _format_number(outputs.lineage_summary.get("unknown_auroc"))},
-            {"label": "OSCR", "value": _format_number(outputs.lineage_summary.get("oscr"))},
-            {"label": "Coverage", "value": _format_percent(coverage)},
-            {
-                "label": "Queries / families",
-                "value": (
-                    f"{int(query_count):,} / {int(family_count):,}"
-                    if query_count is not None and family_count is not None
-                    else "n/a"
-                ),
-                "delta": lineage_status,
-            },
+    if scaleup is not None:
+        internal_row = (
+            scaleup.lineage_internal_metrics.iloc[0]
+            if len(scaleup.lineage_internal_metrics) == 1
+            else None
+        )
+        gallery_row = (
+            scaleup.lineage_gallery_metrics.iloc[0]
+            if len(scaleup.lineage_gallery_metrics) == 1
+            else None
+        )
+        labels = scaleup.lineage_validation_metrics
+        manual = labels.loc[labels["label_source"].astype(str).eq("manual_confirmed")]
+        consensus = labels.loc[
+            labels["label_source"].astype(str).eq("metadata_root_consensus")
         ]
-    )
-    st.caption(
-        "Frozen canonical-root retrieval, descriptive query-excluded known-family "
-        "attribution, and leave-one-family-out open-set metrics."
-    )
+        manual_row = manual.iloc[0] if len(manual) == 1 else None
+        consensus_row = consensus.iloc[0] if len(consensus) == 1 else None
+        _render_cards(
+            [
+                {
+                    "label": "Models / clusters",
+                    "value": (
+                        f"{int(internal_row['n_models']):,} / {int(internal_row['n_clusters']):,}"
+                        if internal_row is not None
+                        else "n/a"
+                    ),
+                    "delta": "selected without labels",
+                },
+                {
+                    "label": "Core cosine silhouette",
+                    "value": _format_number(
+                        internal_row["silhouette_cosine"]
+                        if internal_row is not None
+                        else None
+                    ),
+                },
+                {
+                    "label": "Core seed stability ARI",
+                    "value": _format_number(
+                        internal_row["mean_seed_stability_ari"]
+                        if internal_row is not None
+                        else None
+                    ),
+                    "delta": "complete-role core",
+                },
+                {
+                    "label": "Supplied-gallery top-1",
+                    "value": _format_percent(
+                        gallery_row["root_macro_top1"]
+                        if gallery_row is not None
+                        else None
+                    ),
+                    "delta": (
+                        f"{int(gallery_row['n_scored_queries']):,} queries / "
+                        f"{int(gallery_row['n_profiled_roots']):,} profiled roots"
+                        if gallery_row is not None
+                        else "post-freeze validation"
+                    ),
+                },
+                {
+                    "label": "Supplied-gallery top-3",
+                    "value": _format_percent(
+                        gallery_row["root_macro_top3"]
+                        if gallery_row is not None
+                        else None
+                    ),
+                    "delta": "root-balanced",
+                },
+                {
+                    "label": "Post-freeze family ARI",
+                    "value": _format_number(
+                        consensus_row["adjusted_rand"]
+                        if consensus_row is not None
+                        else None
+                    ),
+                    "delta": (
+                        f"{int(consensus_row['n_models']):,} validation labels"
+                        if consensus_row is not None
+                        else "labels revealed after freeze"
+                    ),
+                },
+            ]
+        )
+        validation_caption = (
+            "Clusters, spectral representatives, and supplied-gallery matches were frozen from model-weight "
+            "profiles before family labels were loaded. Gallery and family scores use those labels "
+            "only afterward for validation."
+        )
+        if manual_row is not None:
+            validation_caption += f" The manual audit covers {int(manual_row['n_models']):,} models."
+        st.caption(validation_caption)
+    else:
+        open_set = outputs.lineage_metrics.get(
+            "open_set", outputs.lineage_metrics.get("open_set_metrics", {})
+        )
+        coverage = _frozen_metric(open_set, "scorable_coverage")
+        family_count = outputs.lineage_summary.get("n_families")
+        query_count = outputs.lineage_summary.get("n_queries")
+        lineage_status = (
+            "Inferential"
+            if outputs.lineage_summary.get("inferential") is True
+            else "Descriptive"
+        )
+        _render_cards(
+            [
+                {"label": "Root top-1", "value": _format_percent(outputs.lineage_summary.get("root_macro_top1"))},
+                {"label": "Known-family top-1", "value": _format_percent(outputs.lineage_summary.get("observed_family_top1")), "delta": "descriptive"},
+                {"label": "Unknown AUROC", "value": _format_number(outputs.lineage_summary.get("unknown_auroc"))},
+                {"label": "OSCR", "value": _format_number(outputs.lineage_summary.get("oscr"))},
+                {"label": "Coverage", "value": _format_percent(coverage)},
+                {"label": "Queries / families", "value": f"{int(query_count):,} / {int(family_count):,}" if query_count is not None and family_count is not None else "n/a", "delta": lineage_status},
+            ]
+        )
+        st.caption("Retained manual-audit lineage metrics.")
     lineage = _lineage_display_frame(frame)
     if lineage.empty:
         st.info("No frozen clustered models match the current filters.")
         return
-    if "family_prediction_scope" in lineage.columns and lineage[
+    if scaleup is not None:
+        st.caption(
+            f"{len(lineage):,} weight-only clustered models shown. Center labels are observed core "
+            "models nearest their cluster mean; neighbor links come from spectral similarity. "
+            "Galaxy positions are a display layout."
+        )
+    elif "family_prediction_scope" in lineage.columns and lineage[
         "family_prediction_scope"
     ].notna().any():
         st.caption(
@@ -2280,9 +2454,113 @@ def _render_frozen_lineage(
 
 
 def _render_frozen_evidence(
-    outputs: StudyOutputs,
+    outputs: StudyOutputs | None,
     scaleup: ScaleupOutputs | None = None,
 ) -> None:
+    if scaleup is not None:
+        config = scaleup.metadata.get("config", {})
+        boundary = scaleup.metadata.get("method_boundary", {})
+        st.warning(
+            "This run uses stored DKS alpha values with normalized-depth interpolation. "
+            "It is weight-only, but it is not an exact fixed-Hill replication of the paper."
+        )
+        st.markdown("**Method boundary**")
+        st.dataframe(
+            pd.DataFrame(
+                {
+                    "field": [
+                        "profile",
+                        "unlabeled discovery inputs",
+                        "supplied gallery inputs",
+                        "performance prediction inputs",
+                        "metadata role",
+                        "run",
+                    ],
+                    "value": [
+                        str(config.get("profile", "not recorded")),
+                        ", ".join(
+                            boundary.get("unlabelled_lineage_discovery_inputs", [])
+                        ),
+                        ", ".join(
+                            boundary.get("supplied_gallery_routing_inputs", [])
+                        ),
+                        ", ".join(boundary.get("performance_prediction_inputs", [])),
+                        str(boundary.get("metadata_role", "not recorded")).replace("_", " "),
+                        str(scaleup.metadata.get("run_id", scaleup.run_dir.name)),
+                    ],
+                }
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+        with st.expander("Weight-only report", expanded=True):
+            st.markdown(scaleup.report)
+        with st.expander("Unlabeled cluster selection and internal checks"):
+            st.dataframe(
+                scaleup.lineage_internal_metrics,
+                width="stretch",
+                hide_index=True,
+            )
+            st.dataframe(
+                scaleup.lineage_cluster_selection,
+                width="stretch",
+                hide_index=True,
+            )
+            if not scaleup.role_coverage_selection.empty:
+                st.caption(
+                    "Missing-role cutoffs were selected by masking complete profiles; no labels or scores were used."
+                )
+                st.dataframe(
+                    scaleup.role_coverage_selection,
+                    width="stretch",
+                    hide_index=True,
+                )
+            if not scaleup.role_masking_patterns.empty:
+                st.dataframe(
+                    scaleup.role_masking_patterns,
+                    width="stretch",
+                    hide_index=True,
+                )
+        with st.expander("Post-freeze lineage validation"):
+            st.caption("Family and root labels were read only after clusters and gallery matches were frozen.")
+            st.dataframe(
+                scaleup.lineage_validation_metrics,
+                width="stretch",
+                hide_index=True,
+            )
+            st.dataframe(
+                scaleup.lineage_gallery_metrics,
+                width="stretch",
+                hide_index=True,
+            )
+        with st.expander("Performance evaluation"):
+            st.dataframe(scaleup.performance_metrics, width="stretch", hide_index=True)
+            st.dataframe(
+                scaleup.performance_cluster_holdout_metrics,
+                width="stretch",
+                hide_index=True,
+            )
+            st.dataframe(
+                scaleup.performance_paper_summary,
+                width="stretch",
+                hide_index=True,
+            )
+        with st.expander("Performance leakage and target audits"):
+            st.dataframe(
+                scaleup.performance_leakage_audit,
+                width="stretch",
+                hide_index=True,
+            )
+            st.dataframe(
+                scaleup.performance_target_audit,
+                width="stretch",
+                hide_index=True,
+            )
+        return
+
+    if outputs is None:
+        st.info("No retained evidence run is available.")
+        return
     provenance_values = []
     if "estimator_provenance" in outputs.lineage_predictions.columns:
         provenance_values = sorted(
@@ -2319,17 +2597,6 @@ def _render_frozen_evidence(
             st.markdown(report_path.read_text(encoding="utf-8"))
         except OSError as error:
             st.error(f"The frozen report is unavailable: {error}")
-    if scaleup is not None:
-        with st.expander("Scale-up report", expanded=True):
-            st.markdown(scaleup.report)
-        with st.expander("Scale-up metadata"):
-            st.json(dict(scaleup.metadata))
-        with st.expander("Broad-lineage sensitivity"):
-            st.dataframe(
-                scaleup.broad_cluster_metrics,
-                width="stretch",
-                hide_index=True,
-            )
 
 
 def render_ablation_atlas(
@@ -2338,7 +2605,7 @@ def render_ablation_atlas(
 ) -> None:
     _render_dashboard_chrome()
     st.title("Spectral Atlas")
-    st.caption("Read-only lineage and performance evidence from retained study artifacts.")
+    st.caption("Read-only weight-profile clusters, lineage validation, and performance predictions.")
 
     discovered_study = default_study_run()
     discovered_scaleup = default_scaleup_run()
@@ -2352,69 +2619,80 @@ def render_ablation_atlas(
         st.subheader("Data sources")
         if run_path is None:
             configured_path = st.text_input(
-                "Retained study",
+                "Retained fallback",
                 value=configured_path,
                 placeholder="research_runs/htsr_study/runs/<run-id>",
+                help="Optional fallback when no weight-only run is available.",
             ).strip()
         else:
             st.caption(configured_path)
         if scaleup_path is None:
             configured_scaleup = st.text_input(
-                "Scale-up study",
+                "Weight-only study",
                 value=configured_scaleup,
-                placeholder="research_runs/htsr_scaleup/runs/<run-id>",
-                help="Optional overlay for the full census and leading alpha-profile predictions.",
+                placeholder="research_runs/htsr_weight_only/runs/<run-id>",
+                help="Primary metadata-isolated run for the full census and alpha-profile predictions.",
             ).strip()
         elif configured_scaleup:
             st.caption(configured_scaleup)
 
-    if not configured_path:
-        st.warning("Frozen study unavailable")
-        st.caption("Provide a retained study directory or set HTSR_STUDY_RUN.")
+    if not configured_path and not configured_scaleup:
+        st.warning("No study run is available")
+        st.caption("Provide a weight-only run or set HTSR_SCALEUP_RUN.")
         return
 
     progress_bar = st.progress(0.0, text="0% Loading study")
     status = st.empty()
-    try:
-        progress_bar.progress(0.15, text="15% Validating run files")
-        status.caption("Reading validated frozen CSV and JSON outputs.")
-        run_state_token = _frozen_run_state_token(configured_path)
-        outputs = _cached_study_outputs(configured_path, run_state_token)
-    except Exception as error:
-        progress_bar.empty()
-        status.empty()
-        st.error("Frozen study unavailable")
-        st.caption(str(error))
-        return
-
     scaleup: ScaleupOutputs | None = None
     scaleup_error: Exception | None = None
     if configured_scaleup:
         try:
-            progress_bar.progress(0.55, text="55% Loading scale-up results")
-            status.caption("Reading the large-scale census and direct alpha predictions.")
+            progress_bar.progress(0.25, text="25% Loading weight-only results")
+            status.caption("Reading unlabeled clusters and alpha-profile predictions.")
             scaleup_token = _scaleup_run_state_token(configured_scaleup)
             scaleup = _cached_scaleup_outputs(configured_scaleup, scaleup_token)
         except Exception as error:
             scaleup_error = error
 
+    outputs: StudyOutputs | None = None
+    study_error: Exception | None = None
+    if scaleup is None and configured_path:
+        try:
+            progress_bar.progress(0.55, text="55% Loading retained fallback")
+            status.caption("The weight-only run is unavailable; reading the fallback.")
+            run_state_token = _frozen_run_state_token(configured_path)
+            outputs = _cached_study_outputs(configured_path, run_state_token)
+        except Exception as error:
+            study_error = error
+
+    if outputs is None and scaleup is None:
+        progress_bar.empty()
+        status.empty()
+        st.error("No valid study run could be loaded")
+        for error in (scaleup_error, study_error):
+            if error is not None:
+                st.caption(str(error))
+        return
+
     progress_bar.progress(0.80, text="80% Preparing display tables")
-    status.caption("Adapting retained tables for the 2D viewer.")
-    cache = (
-        _dashboard_cache_from_scaleup(outputs, scaleup)
-        if scaleup is not None
-        else _dashboard_cache_from_study(outputs)
-    )
+    status.caption("Adapting frozen tables for the 2D viewer.")
+    if scaleup is not None:
+        cache = _dashboard_cache_from_scaleup(outputs, scaleup)
+    else:
+        assert outputs is not None
+        cache = _dashboard_cache_from_study(outputs)
     progress_bar.progress(1.0, text="100% Study loaded")
     progress_bar.empty()
     status.empty()
     if scaleup_error is not None:
-        st.warning(f"Scale-up overlay unavailable; showing the retained run only. {scaleup_error}")
+        st.warning(f"Weight-only run unavailable; showing the retained run only. {scaleup_error}")
 
     _render_cards(_study_summary_cards(outputs, scaleup))
     if scaleup is not None:
-        st.caption(f"Scale-up: {scaleup.run_dir} | retained base: {outputs.run_dir}")
+        scaleup_id = Path(str(scaleup.metadata.get("run_id", scaleup.run_dir.name))).name
+        st.caption(f"Weight-only evidence: `{scaleup_id}`")
     else:
+        assert outputs is not None
         st.caption(f"Run: {outputs.run_dir}")
 
     panel = st.radio("View", options=_panel_options(), horizontal=True)
@@ -2505,6 +2783,7 @@ def render_ablation_atlas(
         _render_frozen_lineage(
             outputs,
             filtered,
+            scaleup=scaleup,
             color_by=color_by,
             size_by=size_by,
             edge_density=edge_density,

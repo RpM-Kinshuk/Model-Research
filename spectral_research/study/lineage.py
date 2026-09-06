@@ -583,9 +583,8 @@ def paper_style_alpha_similarity(
     """Mean seven-role Spearman correlation using stored DKS alpha.
 
     Equal-depth signatures use the paper's Eq. 2 directly. Unequal-depth
-    signatures use the paper's injective order-preserving DP layer alignment over
-    jointly z-scored seven-role vectors, followed by Eq. 2 on the matched layers.
-    The stored estimator is DKS, not the paper's fixed-Hill estimator.
+    signatures use the paper's z-scored, order-preserving dynamic-programming
+    alignment. The stored estimator is DKS, not fixed-tail Hill.
     """
 
     query_signature = _signature_matrix(query, name="query trajectory")

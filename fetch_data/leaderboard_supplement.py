@@ -8,6 +8,22 @@ from fetch_data.phase2_schema import canonical_model_key, normalize_repo_id
 
 
 HF_LINK_PATTERN = re.compile(r"huggingface\.co/([^\"?#]+)")
+MERGE_DISPLAY_SUFFIX = re.compile(r"\s+\(merge\)\s*$", re.IGNORECASE)
+LEADERBOARD_SCORE_COLUMNS = (
+    "Average ⬆️",
+    "IFEval Raw",
+    "IFEval",
+    "BBH Raw",
+    "BBH",
+    "MATH Lvl 5 Raw",
+    "MATH Lvl 5",
+    "GPQA Raw",
+    "GPQA",
+    "MUSR Raw",
+    "MUSR",
+    "MMLU-PRO Raw",
+    "MMLU-PRO",
+)
 KNOWN_PRECISIONS = {
     "bf16",
     "bfloat16",
@@ -39,6 +55,7 @@ def _normalize_leaderboard_repo_id(raw_value: object) -> str | None:
     match = HF_LINK_PATTERN.search(value)
     if match:
         value = match.group(1).strip()
+    value = MERGE_DISPLAY_SUFFIX.sub("", value)
     repo_id, _ = _parse_model_string(value)
     return normalize_repo_id(repo_id)
 
@@ -81,18 +98,27 @@ def leaderboard_frame_to_candidates(frame: pd.DataFrame) -> pd.DataFrame:
         if "Base Model" in result.columns
         else pd.Series([None] * len(result), index=result.index)
     )
+    self_reference = base_model.str.casefold().eq(result["repo_id_norm"].str.casefold())
+    base_model = base_model.mask(self_reference)
     merged_flag = (
         result["Merged"].fillna(False).astype(bool)
         if "Merged" in result.columns
         else pd.Series(False, index=result.index)
     )
+    if "Base Model" in result.columns:
+        merged_flag |= result["Base Model"].fillna("").astype(str).str.contains(
+            MERGE_DISPLAY_SUFFIX
+        )
+    if "Type" in result.columns:
+        merged_flag |= result["Type"].fillna("").astype(str).str.contains(
+            "merge", case=False, regex=False
+        )
 
     relation = pd.Series("unknown", index=result.index, dtype="object")
     relation = relation.where(~merged_flag, "merge")
     relation = relation.where(~(base_model.notna() & ~merged_flag), "finetune")
 
-    candidates = pd.DataFrame(
-        {
+    candidate_columns = {
             "model_id": result["repo_id_norm"],
             "repo_id_norm": result["repo_id_norm"],
             "revision_norm": None,
@@ -104,8 +130,16 @@ def leaderboard_frame_to_candidates(frame: pd.DataFrame) -> pd.DataFrame:
             "#Params (B)": result.get("#Params (B)"),
             "Average ⬆️": result.get("Average ⬆️"),
             "candidate_source": "leaderboard_dataset",
-        }
-    )
+    }
+    for column in (
+        "eval_name",
+        "Model sha",
+        "Generation",
+        *LEADERBOARD_SCORE_COLUMNS,
+    ):
+        if column in result.columns:
+            candidate_columns[column] = result[column]
+    candidates = pd.DataFrame(candidate_columns)
     candidates = candidates[candidates["canonical_model_key"].notna()].drop_duplicates(
         subset=["canonical_model_key"], keep="first"
     )

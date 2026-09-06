@@ -26,14 +26,19 @@ STUDY_RUN_MARKERS = (
 SCALEUP_RUN_MARKERS = (
     "metadata.json",
     "population_ledger.csv",
-    "modern_pooled_predictions.csv",
-    "modern_pooled_metrics.csv",
-    "modern_pooled_increments.csv",
-    "legacy_paired_predictions.csv",
-    "legacy_paired_metrics.csv",
-    "legacy_increments.csv",
-    "lineage_broad_cluster_metrics.csv",
+    "lineage_cluster_assignments.csv",
+    "lineage_internal_metrics.csv",
+    "lineage_cluster_selection.csv",
+    "lineage_validation_metrics.csv",
+    "lineage_gallery_metrics.csv",
+    "performance_predictions.csv",
+    "performance_metrics.csv",
+    "performance_paper_summary.csv",
+    "performance_leakage_audit.csv",
+    "performance_cluster_holdout_metrics.csv",
+    "performance_target_audit.csv",
     "report.md",
+    "artifact_manifest.json",
 )
 
 
@@ -77,7 +82,7 @@ def default_study_run() -> Path | None:
 def default_scaleup_run() -> Path | None:
     return _configured_or_latest(
         SCALEUP_RUN_ENV,
-        Path("research_runs/htsr_scaleup/runs"),
+        Path("research_runs/htsr_weight_only/runs"),
         SCALEUP_RUN_MARKERS,
     )
 
