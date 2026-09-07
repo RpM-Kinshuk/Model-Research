@@ -225,6 +225,243 @@ def corpus_coverage(metadata: dict, ledger: pd.DataFrame) -> dict[str, int]:
     }
 
 
+def load_study_collections(
+    metadata: dict,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict, Path]:
+    validation_run = Path(str(metadata["sources"]["validation_run"]))
+    validation_metadata = json.loads(
+        (validation_run / "metadata.json").read_text(encoding="utf-8")
+    )
+    sources = validation_metadata["sources"]
+    phase2 = pd.read_csv(Path(sources["phase2"]["path"]), low_memory=False)
+    ablation_path = Path(sources["ablation"]["path"])
+    ablation = pd.read_csv(ablation_path, low_memory=False)
+    summary_path = ablation_path.parent / "ablation_summary.json"
+    ablation_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    return phase2, ablation, ablation_summary, Path(sources["graph"]["path"])
+
+
+def collection_sources(phase2: pd.DataFrame, ablation: pd.DataFrame) -> None:
+    source_specs = [
+        (
+            phase2["candidate_source"].value_counts(),
+            {
+                "atlas": "Model Atlas graph",
+                "seed_metadata": "sampled metadata",
+                "leaderboard_dataset": "Open LLM Leaderboard",
+                "hf_search": "targeted Hub search",
+            },
+            "Phase 2: 15,000 models",
+            BERKELEY,
+        ),
+        (
+            ablation["eval_source"].value_counts(),
+            {
+                "open_llm_leaderboard_results": "older leaderboard",
+                "open_llm_leaderboard_contents": "current leaderboard",
+            },
+            f"Ablation: {len(ablation):,} disjoint models",
+            DARTMOUTH,
+        ),
+    ]
+    fig, axes = plt.subplots(1, 2, figsize=(11.2, 4.25))
+    for ax, (counts, names, title, color) in zip(axes, source_specs):
+        counts = counts.rename(index=names).sort_values()
+        shares = counts / counts.sum()
+        bars = ax.barh(counts.index, shares, color=color, height=0.58)
+        for bar, share in zip(bars, shares):
+            ax.text(
+                share + 0.012,
+                bar.get_y() + bar.get_height() / 2,
+                f"{share:.1%}",
+                va="center",
+                color=INK,
+                weight="bold",
+                fontsize=9,
+            )
+        ax.set_xlim(0, max(1.0, float(shares.max()) * 1.18))
+        ax.xaxis.set_major_formatter(lambda value, _: f"{value:.0%}")
+        ax.set_xlabel("share of selected dataset")
+        ax.set_title(title, loc="left", fontsize=13, pad=10)
+        clean_axis(ax, grid="x")
+    finish(fig, "corpus_sources.png")
+
+
+def model_type_distribution(phase2: pd.DataFrame, ablation: pd.DataFrame) -> None:
+    order = [
+        "adapter",
+        "finetune",
+        "quantized",
+        "merge",
+        "multimodal",
+        "moe",
+        "other_text",
+        "base_source",
+    ]
+    labels = [
+        "Adapter",
+        "Fine-tune",
+        "Quantized",
+        "Merge",
+        "Multimodal",
+        "MoE",
+        "Other text",
+        "Base source",
+    ]
+    phase_shares = phase2["primary_type_bucket"].value_counts(normalize=True).reindex(order, fill_value=0)
+    ablation_shares = ablation["primary_type_bucket"].value_counts(normalize=True).reindex(order, fill_value=0)
+    y = np.arange(len(order))
+    fig, ax = plt.subplots(figsize=(8.0, 5.0))
+    ax.barh(y + 0.18, phase_shares, height=0.34, color=BERKELEY, label="Phase 2")
+    ax.barh(y - 0.18, ablation_shares, height=0.34, color=DARTMOUTH, label="Ablation")
+    ax.set_yticks(y, labels)
+    ax.invert_yaxis()
+    ax.set_xlim(0, max(0.72, float(max(phase_shares.max(), ablation_shares.max())) * 1.08))
+    ax.xaxis.set_major_formatter(lambda value, _: f"{value:.0%}")
+    ax.set_xlabel("share of selected dataset")
+    ax.set_title("Model types differ by design", loc="left", fontsize=14, pad=10)
+    ax.legend(frameon=False, ncols=2, loc="lower right")
+    clean_axis(ax, grid="x")
+    finish(fig, "corpus_types.png")
+
+
+def _clean_text(value: object) -> str:
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return ""
+    return str(value).strip()
+
+
+def _architecture_group(value: str) -> str:
+    text = value.casefold()
+    if not text or text in {"unknown", "?", "nan"}:
+        return "Missing / unknown"
+    if any(token in text for token in ("llava", "internvl", "vision", "mllama")):
+        return "Vision-language"
+    if "mixtral" in text:
+        return "Mixtral"
+    if "llama" in text:
+        return "Llama"
+    if "mistral" in text:
+        return "Mistral"
+    if "qwen" in text:
+        return "Qwen"
+    if "gemma" in text:
+        return "Gemma"
+    if "phi" in text:
+        return "Phi"
+    return "Other labelled"
+
+
+def architecture_groups(frame: pd.DataFrame, graph_path: Path) -> pd.Series:
+    graph = json.loads(graph_path.read_text(encoding="utf-8"))
+    graph_architecture: dict[str, str] = {}
+    for node in graph.get("nodes", []):
+        value = (node.get("attributes") or {}).get("architectures")
+        if isinstance(value, list):
+            value = value[0] if value else ""
+        graph_architecture[str(node.get("id", "")).casefold()] = _clean_text(value)
+
+    groups: list[str] = []
+    for _, row_value in frame.iterrows():
+        model_id = _clean_text(row_value.get("repo_id_norm")) or _clean_text(
+            row_value.get("model_id")
+        )
+        candidates = [
+            graph_architecture.get(model_id.casefold(), ""),
+            _clean_text(row_value.get("Architecture_lb")),
+            _clean_text(row_value.get("Architecture")),
+            _clean_text(row_value.get("architecture")),
+        ]
+        architecture = next(
+            (
+                value
+                for value in candidates
+                if len(value) > 2 and value.casefold() not in {"unknown", "?", "nan"}
+            ),
+            "",
+        )
+        groups.append(_architecture_group(architecture))
+    return pd.Series(groups, index=frame.index, dtype="object")
+
+
+def architecture_distribution(
+    phase2: pd.DataFrame, ablation: pd.DataFrame, graph_path: Path
+) -> tuple[pd.Series, pd.Series]:
+    phase_groups = architecture_groups(phase2, graph_path)
+    ablation_groups = architecture_groups(ablation, graph_path)
+    order = [
+        "Llama",
+        "Mistral",
+        "Qwen",
+        "Mixtral",
+        "Gemma",
+        "Phi",
+        "Vision-language",
+        "Other labelled",
+        "Missing / unknown",
+    ]
+    phase_shares = phase_groups.value_counts(normalize=True).reindex(order, fill_value=0)
+    ablation_shares = ablation_groups.value_counts(normalize=True).reindex(order, fill_value=0)
+    y = np.arange(len(order))
+    fig, ax = plt.subplots(figsize=(8.0, 5.0))
+    ax.barh(y + 0.18, phase_shares, height=0.34, color=BERKELEY, label="Phase 2")
+    ax.barh(y - 0.18, ablation_shares, height=0.34, color=DARTMOUTH, label="Ablation")
+    ax.set_yticks(y, order)
+    ax.invert_yaxis()
+    ax.set_xlim(0, max(0.46, float(max(phase_shares.max(), ablation_shares.max())) * 1.08))
+    ax.xaxis.set_major_formatter(lambda value, _: f"{value:.0%}")
+    ax.set_xlabel("share of selected dataset")
+    ax.set_title("Architecture families from source records", loc="left", fontsize=14, pad=10)
+    ax.legend(frameon=False, ncols=2, loc="lower right")
+    clean_axis(ax, grid="x")
+    finish(fig, "corpus_architectures.png")
+    return phase_groups, ablation_groups
+
+
+def collection_summary(
+    phase2: pd.DataFrame,
+    ablation: pd.DataFrame,
+    ablation_summary: dict,
+    phase_architecture: pd.Series,
+    ablation_architecture: pd.Series,
+) -> dict[str, object]:
+    def available_count(frame: pd.DataFrame, column: str, value: str) -> int:
+        return int(frame[column].fillna("").astype(str).eq(value).sum())
+
+    def positive_parameter_count(frame: pd.DataFrame) -> int:
+        return int(pd.to_numeric(frame.get("#Params (B)"), errors="coerce").gt(0).sum())
+
+    return {
+        "phase2": {
+            "selected": int(len(phase2)),
+            "benchmark_rows": available_count(phase2, "eval_status", "eval_present"),
+            "lineage_metadata_rows": available_count(phase2, "lineage_status", "known"),
+            "architecture_rows": int(phase_architecture.ne("Missing / unknown").sum()),
+            "parameter_rows": positive_parameter_count(phase2),
+        },
+        "ablation": {
+            "candidates": int(ablation_summary["total_candidate_rows"]),
+            "selected": int(len(ablation)),
+            "benchmark_rows": available_count(ablation, "eval_status", "eval_present"),
+            "complete_benchmark_rows": available_count(
+                ablation, "eval_coverage_flag", "complete"
+            ),
+            "lineage_metadata_rows": available_count(ablation, "lineage_status", "known"),
+            "architecture_rows": int(ablation_architecture.ne("Missing / unknown").sum()),
+            "parameter_rows": positive_parameter_count(ablation),
+            "phase2_overlap_rows": int(ablation_summary["phase2_overlap_rows"]),
+            "inaccessible_rows": int(
+                ablation_summary["top_rejection_reasons"].get("repo_inaccessible", 0)
+            ),
+            "duplicate_rows": int(
+                ablation_summary["top_rejection_reasons"].get(
+                    "duplicate_lower_priority", 0
+                )
+            ),
+        },
+    }
+
+
 def cluster_selection(selection: pd.DataFrame) -> None:
     selected = selection[selection["selected"].astype(bool)].iloc[0]
     fig, ax = plt.subplots(figsize=(9.5, 4.7))
@@ -543,6 +780,20 @@ def main() -> None:
     masking = pd.read_csv(run / "role_masking_patterns.csv")
     coverage_selection = pd.read_csv(run / "role_coverage_selection.csv")
 
+    phase2, ablation, ablation_summary, graph_path = load_study_collections(metadata)
+    collection_sources(phase2, ablation)
+    model_type_distribution(phase2, ablation)
+    phase_architecture, ablation_architecture = architecture_distribution(
+        phase2, ablation, graph_path
+    )
+    collections = collection_summary(
+        phase2,
+        ablation,
+        ablation_summary,
+        phase_architecture,
+        ablation_architecture,
+    )
+
     profile_sources = corpus_coverage(metadata, ledger)
     cluster_selection(selection)
     cluster_sizes(assignments)
@@ -569,6 +820,7 @@ def main() -> None:
             "leading_performance_method": leading_method,
             "role_masking": masking.to_dict(orient="records"),
             "role_coverage_selection": coverage_selection.to_dict(orient="records"),
+            "collections": collections,
         }
     )
     (OUT / "chart_data.json").write_text(
@@ -589,6 +841,9 @@ def main() -> None:
             )
             average_rows(hard_performance).to_excel(
                 writer, sheet_name="performance_cluster_holdout", index=False
+            )
+            pd.DataFrame(collections).T.to_excel(
+                writer, sheet_name="collection_summary"
             )
         workbook_written = True
     except ImportError:

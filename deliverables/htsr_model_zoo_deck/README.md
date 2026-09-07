@@ -22,6 +22,6 @@ node model_zoo_htsr_study.js
 frontend project.
 
 The deck uses UC Berkeley navy and gold, Dartmouth green, and Booking.com blue
-and cyan. It contains a 14-slide main narrative and a 5-slide appendix. PDF
+and cyan. It contains a 16-slide main narrative and a 5-slide appendix. PDF
 rendering and visual QA are separate steps and are intentionally not part of
 this source update.

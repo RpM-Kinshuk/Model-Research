@@ -589,5 +589,26 @@
       "selection_uses_metadata": false,
       "selected": false
     }
-  ]
+  ],
+  "collections": {
+    "phase2": {
+      "selected": 15000,
+      "benchmark_rows": 2291,
+      "lineage_metadata_rows": 13301,
+      "architecture_rows": 10793,
+      "parameter_rows": 2284
+    },
+    "ablation": {
+      "candidates": 11836,
+      "selected": 4713,
+      "benchmark_rows": 4662,
+      "complete_benchmark_rows": 793,
+      "lineage_metadata_rows": 291,
+      "architecture_rows": 4561,
+      "parameter_rows": 4349,
+      "phase2_overlap_rows": 4177,
+      "inaccessible_rows": 2674,
+      "duplicate_rows": 272
+    }
+  }
 }

@@ -49,6 +49,7 @@ pptx.theme = { headFontFace: DISPLAY, bodyFontFace: FONT, lang: "en-US" };
 
 const counts = DATA.counts;
 const coverage = DATA.profile_sources;
+const collections = DATA.collections;
 const internal = DATA.internal;
 const gallery = DATA.gallery;
 const manual = DATA.validation.find((row) => row.label_source === "manual_confirmed");
@@ -538,13 +539,160 @@ function baseSlide(kicker, title, accent, page, source) {
   );
 }
 
-// 4. Data flow
+// 4. Dataset curation
+{
+  const slide = baseSlide(
+    "DATASET CURATION",
+    "Two collections were built for different jobs",
+    C.booking,
+    4,
+    "Sources: fetch_data/build_phase2_zoo.py, fetch_data/build_ablation_dataset.py, and ablation_source_manifest.json"
+  );
+  addImage(slide, "corpus_sources.png", 0.42, 1.24, 7.25, 3.08);
+
+  addText(slide, "PHASE 2 · BROAD MODEL ZOO", 7.95, 1.31, 4.45, 0.25, {
+    fontSize: 10,
+    bold: true,
+    color: C.booking,
+  });
+  const phase2Steps = [
+    "Combine the Model Atlas graph, sampled records, leaderboard rows, and targeted Hub searches.",
+    "Normalize owner/repository and revision; keep one row per canonical checkpoint.",
+    "Fill model-type quotas while balancing score and lineage availability; favor rows with existing weight results.",
+  ];
+  phase2Steps.forEach((item, index) =>
+    addBox(slide, `${index + 1}  ${item}`, 7.95, 1.72 + index * 0.73, 4.62, 0.56, {
+      fill: index === 0 ? C.bookingLight : C.white,
+      line: C.booking,
+      color: C.ink,
+      fontSize: 9.2,
+      bold: true,
+      align: "left",
+      margin: 0.1,
+    })
+  );
+
+  addText(slide, "ABLATION · DISJOINT SCORE TEST", 7.95, 4.18, 4.45, 0.25, {
+    fontSize: 10,
+    bold: true,
+    color: C.dartmouth,
+  });
+  addBox(
+    slide,
+    `${n(collections.ablation.candidates)} leaderboard candidates`,
+    7.95,
+    4.58,
+    1.78,
+    0.58,
+    { fill: C.dartmouthLight, line: C.dartmouth, color: C.ink, bold: true, align: "center", fontSize: 10.3 }
+  );
+  addArrow(slide, 9.87, 4.87, 0.42, C.dartmouth);
+  addBox(
+    slide,
+    `${n(collections.ablation.selected)} selected`,
+    10.43,
+    4.58,
+    2.12,
+    0.58,
+    { fill: C.dartmouth, line: C.dartmouth, color: C.white, bold: true, align: "center", fontSize: 11.2 }
+  );
+  addBox(
+    slide,
+    `Removed: ${n(collections.ablation.phase2_overlap_rows)} Phase 2 overlaps · ${n(collections.ablation.inaccessible_rows)} inaccessible repositories · ${n(collections.ablation.duplicate_rows)} lower-priority duplicates`,
+    7.95,
+    5.38,
+    4.6,
+    0.68,
+    { fill: C.riskLight, line: C.risk, color: C.risk, bold: true, align: "center", fontSize: 9.2 }
+  );
+  addText(
+    slide,
+    "Keep score coverage high, rotate across model types, cap missing scores at 15%, and stop below 5,000 when no more rows pass.",
+    7.95,
+    6.23,
+    4.6,
+    0.54,
+    { fontSize: 9.5, color: C.body, bold: true, align: "center" }
+  );
+  addBox(
+    slide,
+    "Collection metadata shapes coverage. It is removed before lineage grouping and is not used as a performance feature.",
+    0.62,
+    5.14,
+    6.82,
+    0.78,
+    {
+      fill: C.goldLight,
+      line: C.gold,
+      color: C.ink,
+      fontSize: 10.1,
+      bold: true,
+      align: "center",
+    }
+  );
+}
+
+// 5. Dataset distribution
+{
+  const slide = baseSlide(
+    "DATASET DISTRIBUTION",
+    "Phase 2 is broad; ablation is benchmark-heavy",
+    C.dartmouth,
+    5,
+    "Sources: completed run's Phase 2 and ablation source tables; architecture graph used descriptively after selection."
+  );
+  addImage(slide, "corpus_types.png", 0.38, 1.17, 6.15, 3.82);
+  addImage(slide, "corpus_architectures.png", 6.72, 1.17, 6.15, 3.82);
+  addBox(
+    slide,
+    `PHASE 2 · ${n(collections.phase2.selected)}\n${n(collections.phase2.benchmark_rows)} benchmark scores · ${n(collections.phase2.lineage_metadata_rows)} lineage records\n${n(collections.phase2.architecture_rows)} architecture labels · ${n(collections.phase2.parameter_rows)} parameter counts`,
+    0.62,
+    5.22,
+    5.82,
+    0.88,
+    {
+      fill: C.bookingLight,
+      line: C.booking,
+      color: C.ink,
+      fontSize: 10.1,
+      bold: true,
+      align: "center",
+    }
+  );
+  addBox(
+    slide,
+    `ABLATION · ${n(collections.ablation.selected)}\n${n(collections.ablation.benchmark_rows)} benchmark scores · ${n(collections.ablation.lineage_metadata_rows)} lineage records\n${n(collections.ablation.architecture_rows)} architecture labels · ${n(collections.ablation.parameter_rows)} parameter counts`,
+    6.88,
+    5.22,
+    5.82,
+    0.88,
+    {
+      fill: C.dartmouthLight,
+      line: C.dartmouth,
+      color: C.ink,
+      fontSize: 10.1,
+      bold: true,
+      align: "center",
+    }
+  );
+  addText(
+    slide,
+    "Type and architecture labels describe the datasets only. 'Other labelled' combines lower-count architecture families.",
+    0.72,
+    6.38,
+    11.9,
+    0.3,
+    { fontSize: 9.5, color: C.muted, align: "center" }
+  );
+}
+
+// 6. Data flow
 {
   const slide = baseSlide(
     "DATA FLOW",
     "Shared weight checks lead to task-specific coverage",
     C.booking,
-    4,
+    6,
     `Sources: ${DATA.run_id}/population_ledger.csv; source-run provenance.json and exclusions.csv`
   );
   const rows = [
@@ -633,13 +781,13 @@ function baseSlide(kicker, title, accent, page, source) {
   );
 }
 
-// 5. Profile
+// 7. Profile
 {
   const slide = baseSlide(
     "WEIGHT ANALYSIS",
     "Compare models using the layer roles that are actually observed",
     C.booking,
-    5,
+    7,
     "Sources: stored DKS alpha values by layer; archive/reference-work/Spectral Signatures of Large Language Models.html"
   );
   const steps = [
@@ -730,13 +878,13 @@ function baseSlide(kicker, title, accent, page, source) {
   );
 }
 
-// 6. Corpus
+// 8. Corpus
 {
   const slide = baseSlide(
     "DATA",
     "Seven roles define the paper-comparison core, not general eligibility",
     C.booking,
-    6,
+    8,
     `Sources: ${DATA.run_id}/population_ledger.csv and metadata.json`
   );
   addImage(slide, "corpus_coverage.png", 0.52, 1.24, 8.05, 5.55);
@@ -769,13 +917,13 @@ function baseSlide(kicker, title, accent, page, source) {
   );
 }
 
-// 7. Discovery
+// 9. Discovery
 {
   const slide = baseSlide(
     "LINEAGE DISCOVERY",
     `${n(counts.unlabelled_clusters)} core groups give the clearest separation without family labels`,
     C.dartmouth,
-    7,
+    9,
     `Sources: ${DATA.run_id}/lineage_cluster_selection.csv and lineage_internal_metrics.csv`
   );
   addImage(slide, "cluster_selection.png", 0.46, 1.24, 7.95, 5.48);
@@ -807,13 +955,13 @@ function baseSlide(kicker, title, accent, page, source) {
   });
 }
 
-// 8. Validation
+// 10. Validation
 {
   const slide = baseSlide(
     "VALIDATION AFTER PREDICTION",
     "Compare the 17 weight-derived groups with three independent label sets",
     C.dartmouth,
-    8,
+    10,
     `Sources: ${DATA.run_id}/lineage_validation_metrics.csv and lineage_cluster_assignments.csv`
   );
   addImage(slide, "validation_agreement.png", 0.42, 1.26, 7.28, 4.82);
@@ -862,13 +1010,13 @@ function baseSlide(kicker, title, accent, page, source) {
   });
 }
 
-// 9. Known candidate bases
+// 11. Known candidate bases
 {
   const slide = baseSlide(
     "KNOWN-CANDIDATE LINEAGE TEST",
     "Match each model against a fixed list of known base checkpoints",
     C.berkeley,
-    9,
+    11,
     `Sources: ${DATA.run_id}/lineage_gallery_metrics.csv; reference paper Sec. 5.2 and 5.4`
   );
   addImage(slide, "gallery_accuracy.png", 0.42, 1.26, 7.55, 5.35);
@@ -910,13 +1058,13 @@ function baseSlide(kicker, title, accent, page, source) {
   );
 }
 
-// 10. Paper comparison
+// 12. Paper comparison
 {
   const slide = baseSlide(
     "PAPER COMPARISON",
     "The evaluation boundary matches; the estimator and scale do not",
     C.gold,
-    10,
+    12,
     "Paper: arXiv:2607.03377v1. Current metrics: lineage_gallery_metrics.csv."
   );
   const rows = [
@@ -964,13 +1112,13 @@ function baseSlide(kicker, title, accent, page, source) {
   );
 }
 
-// 11. Performance method
+// 13. Performance method
 {
   const slide = baseSlide(
     "PERFORMANCE METHOD",
     "Every scored model is tested using models outside its test part",
     C.booking,
-    11,
+    13,
     `Sources: ${DATA.run_id}/performance_frozen_splits.csv and performance_prediction_freeze.csv`
   );
   addText(slide, "BUILD FIVE TEST PARTS", 0.72, 1.34, 4.2, 0.26, {
@@ -1046,13 +1194,13 @@ function baseSlide(kicker, title, accent, page, source) {
   );
 }
 
-// 12. Interpolation
+// 14. Interpolation
 {
   const slide = baseSlide(
     "PERFORMANCE RESULTS",
     "Nearest spectral neighbors predict well when similar models are represented",
     C.booking,
-    12,
+    14,
     `Source: ${DATA.run_id}/performance_metrics.csv`
   );
   addImage(slide, "performance_interpolation.png", 0.48, 1.22, 8.05, 5.62);
@@ -1098,13 +1246,13 @@ function baseSlide(kicker, title, accent, page, source) {
   );
 }
 
-// 13. Stress test
+// 15. Stress test
 {
   const slide = baseSlide(
     "NEW-REGION STRESS TEST",
     "Holding out a model's entire weight group reveals the limit",
     C.risk,
-    13,
+    15,
     `Sources: ${DATA.run_id}/performance_cluster_holdout_metrics.csv and performance_cluster_holdout_predictions.csv`
   );
   addImage(slide, "performance_stress.png", 0.44, 1.2, 7.2, 5.72);
@@ -1154,13 +1302,13 @@ function baseSlide(kicker, title, accent, page, source) {
   );
 }
 
-// 14. Decision
+// 16. Decision
 {
   const slide = baseSlide(
     "CONCLUSION",
     "What the results show, and where uncertainty remains",
     C.berkeley,
-    14,
+    16,
     "Summary of the frozen lineage and performance evaluations in the completed run."
   );
   const columns = [
@@ -1234,7 +1382,7 @@ function baseSlide(kicker, title, accent, page, source) {
   );
 }
 
-// 15. Appendix divider
+// 17. Appendix divider
 {
   const slide = pptx.addSlide();
   slide.background = { color: C.berkeley };
@@ -1306,7 +1454,7 @@ function baseSlide(kicker, title, accent, page, source) {
       valign: "mid",
     });
   });
-  addText(slide, "15", 12.05, 7.12, 0.62, 0.18, {
+  addText(slide, "17", 12.05, 7.12, 0.62, 0.18, {
     fontSize: 8,
     bold: true,
     color: C.gold,
@@ -1314,13 +1462,13 @@ function baseSlide(kicker, title, accent, page, source) {
   });
 }
 
-// 16. Collection and GPU scheduling
+// 18. Collection and GPU scheduling
 {
   const slide = baseSlide(
     "APPENDIX A1 · COLLECTION",
     "One scheduler assigns jobs to available graphics processors",
     C.booking,
-    16,
+    18,
     "Sources: Model-Zoo/esd_experiment/gputracker and Model-Zoo/docs/operations/analysis.md"
   );
 
@@ -1426,13 +1574,13 @@ function baseSlide(kicker, title, accent, page, source) {
   );
 }
 
-// 17. Matrix analysis and storage
+// 19. Matrix analysis and storage
 {
   const slide = baseSlide(
     "APPENDIX A2 · MODEL ANALYSIS",
     "Each weight matrix becomes a fitted spectrum and a structured record",
     C.dartmouth,
-    17,
+    19,
     "Sources: Model-Zoo/esd_experiment/src/worker.py and Model-Zoo/README.md"
   );
   const pipeline = [
@@ -1537,13 +1685,13 @@ function baseSlide(kicker, title, accent, page, source) {
   );
 }
 
-// 18. Next method
+// 20. Next method
 {
   const slide = baseSlide(
     "APPENDIX A3 · NEXT EVIDENCE",
     "Add direct weight-matrix comparisons for within-family verification",
     C.dartmouth,
-    18,
+    20,
     "Primary sources: arXiv:2608.07786, arXiv:2608.14929, arXiv:2510.06738."
   );
   addBox(
@@ -1657,13 +1805,13 @@ function baseSlide(kicker, title, accent, page, source) {
   );
 }
 
-// 19. Terms and evidence guide
+// 21. Terms and evidence guide
 {
   const slide = baseSlide(
     "APPENDIX A4 · DEFINITIONS",
     "Measures used in this study",
     C.booking,
-    19,
+    21,
     "Definitions follow the analysis code and cited reference methods."
   );
   const terms = [
