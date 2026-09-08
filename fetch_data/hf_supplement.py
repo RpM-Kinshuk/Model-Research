@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from fetch_data.phase2_schema import canonical_model_key, normalize_repo_id
+from fetch_data.phase2_schema import canonical_model_key, first_architecture, normalize_repo_id
 
 
 DEFAULT_HF_SUPPLEMENT_SEARCHES = ["moe", "mixtral", "qwen2moe", "AWQ", "GPTQ", "GGUF"]
@@ -60,7 +60,7 @@ def _supplement_row(model_info, *, candidate_source: str) -> dict[str, object]:
         "source_model": _card_base_model(getattr(model_info, "cardData", None)) or "",
         "base_model_relation": _supplement_relation(model_info),
         "pipeline_tag": getattr(model_info, "pipeline_tag", None),
-        "Architecture": architectures[0] if architectures else None,
+        "Architecture": first_architecture(architectures),
         "quant_method": quant_config.get("quant_method"),
         "downloads": getattr(model_info, "downloads", None),
         "likes": getattr(model_info, "likes", None),

@@ -16,6 +16,7 @@ from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics import adjusted_rand_score, silhouette_score
 
 from .features import CANONICAL_ROLES
+from .contracts import file_digest
 from .lineage import _role_trajectory, _validate_alpha_provenance
 
 
@@ -69,9 +70,11 @@ def build_partial_role_cache(
         "source_digest": source_digest,
         "model_ids": requested,
         "role_vocabulary": list(CANONICAL_ROLES),
-        "implementation_sha256": hashlib.sha256(
-            Path(__file__).read_bytes()
-        ).hexdigest(),
+        "trajectory_sha256": file_digest(trajectory_path),
+        "implementation_sha256": {
+            name: file_digest(Path(__file__).with_name(name))
+            for name in ("partial_roles.py", "lineage.py", "features.py")
+        },
     }
     cache_path = cache_root / f"{source_name}_{_content_key(payload)}.npz"
     if cache_path.is_file():
@@ -827,6 +830,7 @@ def cross_validated_partial_performance_freeze(
         test_indices = np.flatnonzero(test_mask)
         train_ids = population.loc[train_mask, "model_id"].astype(str).to_numpy()
         test_ids = population.loc[test_mask, "model_id"].astype(str).to_numpy()
+        train_hashes = set(population.loc[train_mask, "profile_hash"].astype(str))
         prediction, neighbors, similarities, shared_roles = _weighted_partial_knn(
             _take(local_corpus, train_indices),
             _take(local_corpus, test_indices),
@@ -859,7 +863,10 @@ def cross_validated_partial_performance_freeze(
                     "usable_role_count": int(
                         local_corpus.role_counts[test_indices[local_position]]
                     ),
-                    "exact_profile_cross_fold": False,
+                    "exact_profile_cross_fold": str(hash_by_model.at[model_id]) in train_hashes,
+                    "shared_role_exact_match_cross_fold": bool(
+                        np.isfinite(first_similarity) and first_similarity >= 1.0 - 1e-6
+                    ),
                 }
             )
             for target_index, target in enumerate(target_columns):

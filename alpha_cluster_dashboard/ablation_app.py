@@ -18,6 +18,14 @@ from alpha_cluster_dashboard.dashboard_cache import (
     recommended_cluster_count,
 )
 from alpha_cluster_dashboard.paths import default_scaleup_run, default_study_run
+from alpha_cluster_dashboard.reassessment_outputs import (
+    LINEAGE_FILES,
+    REQUIRED_REASSESSMENT_FILES,
+    SELECTION_COLUMNS,
+    ReassessmentOutputs,
+    load_reassessment_outputs,
+    reassessment_runs,
+)
 from alpha_cluster_dashboard.scaleup_outputs import (
     REQUIRED_SCALEUP_FILES,
     ScaleupOutputs,
@@ -341,8 +349,11 @@ def _target_options(cache: DashboardCache) -> list[str]:
     return list(cache.predictions) or infer_prediction_targets(cache.metadata)
 
 
-def _panel_options() -> list[str]:
-    return ["Atlas", "Prediction", "Lineage", "Profiles", "Evidence", "Data"]
+def _panel_options(*, include_reassessment: bool = False) -> list[str]:
+    panels = ["Atlas", "Prediction", "Lineage", "Profiles", "Evidence", "Data"]
+    if include_reassessment:
+        panels.insert(-1, "Reassessment")
+    return panels
 
 
 def _frozen_run_state_token(run_path: str | Path) -> str:
@@ -395,6 +406,14 @@ def _cached_study_outputs(run_path: str, run_state_token: str) -> StudyOutputs:
 def _cached_scaleup_outputs(run_path: str, run_state_token: str) -> ScaleupOutputs:
     del run_state_token
     return load_scaleup_outputs(run_path)
+
+
+@st.cache_data(show_spinner=False, max_entries=2)
+def _cached_reassessment_outputs(
+    run_path: str, parent_path: str, run_state_token: str, parent_state_token: str,
+) -> ReassessmentOutputs:
+    del run_state_token, parent_state_token
+    return load_reassessment_outputs(run_path, parent_run=parent_path)
 
 
 def _development_oof_predictions(outputs: StudyOutputs) -> dict[str, pd.DataFrame]:
@@ -2453,6 +2472,151 @@ def _render_frozen_lineage(
     )
 
 
+def _reassessment_scatter(predictions: pd.DataFrame, generation: str, *, dark: bool):
+    finite = predictions.loc[
+        np.isfinite(predictions["actual"]) & np.isfinite(predictions["prediction"])
+    ].copy()
+    tokens = _chart_theme_tokens(dark)
+    fig = px.scatter(
+        finite,
+        x="actual",
+        y="prediction",
+        color="absolute_error",
+        hover_name="model_id",
+        labels={"actual": "Actual average score", "prediction": "Predicted average score", "absolute_error": "Absolute error"},
+        color_continuous_scale=_prediction_error_color_scale(dark=dark),
+        render_mode="webgl",
+    )
+    fig.update_traces(marker={"size": 6, "opacity": 0.75})
+    if not finite.empty:
+        lower = float(finite[["actual", "prediction"]].min().min())
+        upper = float(finite[["actual", "prediction"]].max().max())
+        fig.add_shape(
+            type="line", x0=lower, y0=lower, x1=upper, y1=upper,
+            line={"dash": "dash", "color": tokens["axis_color"]},
+        )
+    _apply_analytics_style(fig, dark=dark)
+    fig.update_layout(
+        height=SECONDARY_PLOT_HEIGHT,
+        margin={"l": 8, "r": 8, "t": 40, "b": 100},
+        coloraxis_colorbar={"orientation": "h", "x": 0.5, "y": -0.24,
+            "xanchor": "center", "yanchor": "top", "len": 0.7,
+            "thickness": 8, "title": {"text": "Absolute error", "side": "top"}},
+    )
+    return fig
+
+
+def _render_reassessment_evidence(parent: ScaleupOutputs | None) -> None:
+    st.subheader("Reassessment evidence")
+    st.warning(
+        "Exploratory reanalysis of previously studied data, not an independent confirmation. "
+        "Source annotations are descriptive; checkpoint revisions are unverified."
+    )
+    if parent is None:
+        st.info("A valid parent weight-only study is required for reassessment evidence.")
+        return
+    runs = reassessment_runs(parent.run_dir)
+    if not runs:
+        st.info("No completed reassessment matches this parent run and manifest.")
+        return
+    selected_run = st.selectbox(
+        "Reassessment run", options=runs, format_func=lambda path: path.name,
+        key=f"reassessment:run:{parent.run_dir}",
+    )
+    try:
+        evidence = _cached_reassessment_outputs(
+            str(selected_run), str(parent.run_dir),
+            _run_state_token(selected_run, (*REQUIRED_REASSESSMENT_FILES, *LINEAGE_FILES)),
+            _run_state_token(parent.run_dir, ("metadata.json", "artifact_manifest.json")),
+        )
+    except (OSError, ValueError, RuntimeError) as error:
+        st.error(f"Reassessment evidence unavailable: {error}")
+        return
+    st.caption(f"Reassessment: `{evidence.run_dir.name}` | Parent: `{evidence.parent_run.name}`")
+    with st.expander("Base-comparison evidence"):
+        if evidence.lineage_gallery.empty:
+            st.info("This run has no saved base-comparison evidence.")
+        else:
+            common = evidence.lineage_gallery.loc[
+                evidence.lineage_gallery["cohort"].eq("common_queries_and_gallery")
+            ]
+            methods = common.set_index("method")
+            if {"trace_sqrt_norm_pearson", "parent_rank32_dks"}.issubset(methods.index):
+                trace = methods.loc["trace_sqrt_norm_pearson"]
+                rank = methods.loc["parent_rank32_dks"]
+                if trace["n_present"] == rank["n_present"] and trace["candidate_count"] == rank["candidate_count"]:
+                    st.markdown(
+                        f"Common labelled queries with profiled roots: **{int(trace['n_present']):,}**, "
+                        f"across **{int(trace['candidate_count'])}** candidates. "
+                        f"Trace micro top-1 **{trace['micro_top1']:.2%}** vs "
+                        f"parent rank32 DKS **{rank['micro_top1']:.2%}**."
+                    )
+            st.caption("Descriptive retrieval accuracy, not calibrated confidence or evidence of direct parentage.")
+            st.dataframe(common, width="stretch", hide_index=True)
+            st.caption(
+                "First-choice accuracy includes tied candidates. Excluding exact ties in either method "
+                "reverses their overall ordering on that smaller subset; it also changes the root mix. "
+                "Neither method is a robust winner from this average alone."
+            )
+            st.markdown("**Open-set score vs margin**")
+            st.caption("Score and margin are ranking signals, not calibrated probabilities.")
+            st.dataframe(evidence.lineage_open_set, width="stretch", hide_index=True)
+    selected_metrics = evidence.metrics
+    preferred = {"split": "near_group_0995", "method": "nonalpha_spectral_trees"}
+    selection: dict[str, str] = {}
+    prefix = f"reassessment:{evidence.run_dir.name}"
+    for column, control in zip(SELECTION_COLUMNS, st.columns([2, 1, 2, 2]), strict=True):
+        options = selected_metrics[column].drop_duplicates().tolist()
+        selection[column] = control.selectbox(
+            column.title(), options=options,
+            index=options.index(preferred[column]) if preferred.get(column) in options else 0,
+            format_func=lambda value: value.replace("_", " ").capitalize(),
+            key=f"{prefix}:{column}",
+        )
+        prefix += f":{selection[column]}"
+        selected_metrics = selected_metrics.loc[selected_metrics[column].eq(selection[column])]
+    metric = selected_metrics.iloc[0]
+    _render_cards([
+        {"label": "Predicted / eligible", "value": f"{int(metric['n_models']):,} / {int(metric['n_eligible']):,}"},
+        {"label": "Reported coverage", "value": _format_percent(metric["coverage"])},
+        {"label": "MAE", "value": _format_number(float(metric["mae"]))},
+        {"label": "RMSE", "value": _format_number(float(metric["rmse"]))},
+        {"label": "Spearman", "value": _format_number(float(metric["spearman"]))},
+        {"label": "Outside 0-100", "value": f"{int(metric['n_outside_0_100']):,}"},
+    ])
+    st.caption("Coverage uses the run's recorded eligible population; errors and outside-0-100 counts use finite predictions.")
+    if selection["split"] == "collection_holdout":
+        st.caption("Collection identity defines this evaluation split, not a predictor feature.")
+    mask = pd.Series(True, index=evidence.predictions.index)
+    comparison = evidence.metrics
+    for column, value in selection.items():
+        mask &= evidence.predictions[column].eq(value)
+        if column != "method":
+            comparison = comparison.loc[comparison[column].eq(value)]
+    predictions = evidence.predictions.loc[mask]
+    if predictions["prediction"].notna().any():
+        _plotly_chart(
+            _reassessment_scatter(predictions, selection["generation"], dark=_is_dark_theme()),
+            key=f"{prefix}:scatter",
+        )
+    else:
+        st.info("No finite predictions are available for this selection.")
+    st.markdown("**All methods**")
+    st.dataframe(
+        comparison.loc[:, ["method", "n_models", "n_eligible", "coverage", "mae", "rmse", "spearman", "n_outside_0_100"]],
+        width="stretch", hide_index=True,
+    )
+    table_columns = [
+        column for column in ("model_id", "actual", "prediction", "absolute_error", "fold", "nearest_similarity", "source_population", "n_train")
+        if column in predictions.columns
+    ]
+    st.dataframe(predictions.loc[:, table_columns], width="stretch", height=SECONDARY_PLOT_HEIGHT, hide_index=True)
+    st.download_button(
+        "Download selected predictions", data=predictions.to_csv(index=False).encode("utf-8"),
+        file_name=f"{evidence.run_dir.name}_{selection['generation']}_predictions.csv", mime="text/csv",
+    )
+
+
 def _render_frozen_evidence(
     outputs: StudyOutputs | None,
     scaleup: ScaleupOutputs | None = None,
@@ -2687,6 +2851,7 @@ def render_ablation_atlas(
     if scaleup_error is not None:
         st.warning(f"Weight-only run unavailable; showing the retained run only. {scaleup_error}")
 
+    st.caption("Prior exploratory study")
     _render_cards(_study_summary_cards(outputs, scaleup))
     if scaleup is not None:
         scaleup_id = Path(str(scaleup.metadata.get("run_id", scaleup.run_dir.name))).name
@@ -2695,7 +2860,10 @@ def render_ablation_atlas(
         assert outputs is not None
         st.caption(f"Run: {outputs.run_dir}")
 
-    panel = st.radio("View", options=_panel_options(), horizontal=True)
+    panel = st.radio("View", options=_panel_options(include_reassessment=scaleup is not None), horizontal=True)
+    if panel == "Reassessment":
+        _render_reassessment_evidence(scaleup)
+        return
     targets = _target_options(cache)
     target = targets[0] if targets else None
     with st.sidebar:

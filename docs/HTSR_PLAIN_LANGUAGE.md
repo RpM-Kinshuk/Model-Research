@@ -1,100 +1,64 @@
-# HTSR study in plain language
+# Current conclusion in plain language
 
-Heavy-tailed self-regularization (HTSR) summarizes the eigenvalues of model
-weight matrices. We use those summaries to compare models without prompts,
-inference data, architecture labels, or family labels.
+We rechecked the reference paper, collection code, saved matrix measurements,
+data joins, predictions, and reporting. We also tested alternatives on the same
+models. The source data was not changed.
 
-## The rule
+## What holds up
 
-Lineage, family, architecture, model type, parameter count, source, and ancestry
-links are hidden while the method groups models. They are opened only after the
-answers are saved.
+**Broad family grouping works.** Comparing how alpha changes through layers
+gives 17 repeatable groups across 10,946 models. Agreement with 2,981 broad-family
+labels is 0.924 by adjusted Rand index, where 1 means identical grouping. The
+174 human-reviewed models are one validation subset, not the whole analysis.
 
-Performance prediction learns from benchmark scores in the training data. The
-test model's score stays hidden until its prediction is saved. Descriptive model
-metadata is never used as a prediction input.
+**Known-base matching depends on the comparison.** Comparing layer-wise
+matrix norms raises first-choice accuracy from 82.30% to 85.19% on the same 3,802
+queries and 29 candidate bases. The correct base is in the first three for
+99.29%. However, excluding queries tied between candidates reverses the overall
+first-choice ordering: 85.88% for alpha ranks, 84.73% for norms. This changes the
+models and roots tested; it is a sensitivity check, not proof that one method is
+better. Neither identifies historical parents or reliably detects missing bases.
 
-## Lineage
+**Performance prediction has more signal than the old method showed.** Keeping
+alpha ranks alone discards useful measurement levels. When near-identical model
+groups are kept out of training together, the old neighbors' average-score
+errors are 3.726 modern and 5.227 legacy. Small trees using spectral measurements
+without alpha reduce these to 3.211 and 3.068.
 
-```text
-complete seven-role summaries -> fit 17 stable groups
-missing-role pattern ---------> hide the same roles from complete models
-                                -> include only patterns that keep neighbors stable
-                                -> attach accepted models to the frozen groups
-                                -> save results -> open labels and score
-```
+## What changed
 
-Seven common transformer roles define the strict core, but they are no longer a
-general requirement:
-
-- 10,431 complete models define the 17 groups;
-- 515 models with reliable partial summaries are added;
-- 10,946 models receive a lineage group.
-
-The 515 additions pass a weight-only check: when the same roles are hidden from
-complete models, the original nearest model remains in the new top ten at least
-90% of the time.
-
-After the groups are saved, agreement with 11 broad family labels is:
-
-- adjusted Rand index 0.913 on 174 human-reviewed models;
-- adjusted Rand index 0.924 on 2,981 models where metadata rules agree.
-
-An adjusted Rand index of 1 means the two groupings match exactly after
-correcting for chance. Agreement with 529 individual root IDs is lower, 0.600,
-because 17 broad groups cannot represent 529 separate answers.
-
-The displayed cluster center is a real core model closest to the group's mean.
-It is a representative model, not a claim about the historical parent.
-
-## Supplied base models
-
-For comparison with the paper, the method still requires all seven roles. It
-compares every query with a fixed list of candidate bases.
-
-We supplied 38 base IDs; 29 had complete summaries. On 3,836 queries whose known
-root was one of those 29:
-
-- top-1 accuracy was 82.27%;
-- top-3 accuracy was 98.41%;
-- top-1 was 84.07% when every root received equal weight.
-
-This answers which supplied base is most similar. It cannot return an omitted
-base or determine which similar model came first.
-
-## Performance
+- **Alpha is not the demonstrated source of that gain.** Adding alpha back to
+  the same tree model slightly worsens those errors, to 3.266 and 3.109. Keep it
+  as a comparison, not an assumed quality indicator.
+- **Broader is not always better.** Summarizing all saved matrices covers 12,365
+  models without role requirements, but broad-family grouping agreement falls
+  to 0.278. Preserve layer-wise grouping for now.
+- **Generalization is limited.** Removing an entire weight-derived group makes
+  score prediction harder. Linear models retain some signal but can produce
+  impossible scores in collection transfer. No method is deployment-validated.
+- **Checkpoint identity is unresolved.** Scores and weights are joined by
+  repository, but saved analyses lack the resolved commit. Some source commits
+  conflict. We cannot verify that every score describes the exact weights used.
 
 ```text
-at least four observed roles + training scores
-    -> five fixed train/test parts
-    -> require at least four shared roles
-    -> three nearest training models
-    -> weighted score estimate
-    -> open test score and measure error
+Weights -> group or compare models -> save answers -> check lineage labels
+
+Weights + other models' training scores -> predict score
+                                      -> save answer -> check held-out score
 ```
 
-The four-role cutoff is selected without benchmark scores: masking those roles
-on complete models retains the original nearest model in the top ten 90.5% of
-the time.
+Family and architecture annotations are not prediction inputs. Metadata still
+helps construct collections and evaluate results. Score prediction needs other
+models' training scores; it does not train on the held-out model's score.
 
-| Scores | Models | Mean absolute error | Spearman rank correlation |
-| --- | ---: | ---: | ---: |
-| Modern | 2,537 | 3.043 | 0.875 |
-| Legacy | 3,515 | 3.188 | 0.897 |
+## Decision
 
-This covers 394 more modern and 519 more legacy scored models than the strict
-seven-role method. Error rises slightly, so the improvement is coverage rather
-than accuracy.
+Keep the existing family groups, add the norm-based base comparison, and use
+non-alpha spectral measurements as the stronger simple performance baseline.
+Do not claim we beat the paper: the populations and evaluations differ.
 
-The harder test removes a model's complete weight group from training. Modern
-error is 7.721 versus 9.102 for the mean baseline. Legacy error is 14.169 versus
-13.182 for the mean baseline, and its rank correlation is only 0.032.
+The next priority is collecting revision-pinned weights and matching benchmark
+records, plus the missing candidate bases and eigenvalues needed for the paper's
+alpha estimator. More tuning on the same uncertain records is less decisive.
 
-## Conclusion
-
-Use the strict seven-role method for paper comparison. For general use, retain
-the stable complete-model groups, add only missing-role patterns that pass the
-masking check, and use wider performance prediction only when comparable
-training models exist. The current evidence does not support exact parent
-recovery, training direction, or reliable score prediction in an unseen weight
-group.
+See [the study](HTSR_STUDY.md) for the process, comparisons, and limitations.

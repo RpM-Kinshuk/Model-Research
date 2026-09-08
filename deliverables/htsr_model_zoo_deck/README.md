@@ -7,8 +7,9 @@ Sources:
 - `method.md`: claim and number guide
 
 The chart build reads the newest manifest-validated run under
-`research_runs/htsr_weight_only/runs/`. Set `HTSR_WEIGHT_ONLY_RUN` to select a
-specific complete run. The build never changes source data.
+`research_runs/htsr_weight_only/runs/` plus its newest completed reassessment.
+Set `HTSR_WEIGHT_ONLY_RUN` and `HTSR_REASSESSMENT_RUN` to select specific complete
+runs. The build never changes source data.
 
 ```bash
 cd deliverables/htsr_model_zoo_deck
@@ -22,6 +23,7 @@ node model_zoo_htsr_study.js
 frontend project.
 
 The deck uses UC Berkeley navy and gold, Dartmouth green, and Booking.com blue
-and cyan. It contains a 16-slide main narrative and a 5-slide appendix. PDF
-rendering and visual QA are separate steps and are intentionally not part of
-this source update.
+and cyan. It contains a 16-slide main narrative and a 5-slide appendix. The PPTX
+and PDF are rebuilt from the same chart data; the PDF is rendered for visual
+inspection. Findings and scope are defined in `docs/HTSR_STUDY.md`, not inferred
+from the decorative cover or galaxy layout.

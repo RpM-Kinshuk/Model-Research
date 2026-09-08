@@ -6,6 +6,7 @@ import pandas as pd
 from spectral_research.study.features import CANONICAL_ROLES
 from spectral_research.study.partial_roles import (
     PartialRoleCorpus,
+    cross_validated_partial_performance_freeze,
     extend_strict_clusters,
     pairwise_role_similarity,
     select_reliable_role_patterns,
@@ -36,6 +37,18 @@ def test_role_similarity_rejects_too_little_overlap() -> None:
 
     assert shared.item() == 1
     assert np.isneginf(similarity.item())
+
+
+def test_leakage_audit_measures_shared_matches_with_different_masks() -> None:
+    corpus = _corpus(["full", "partial"], [[True] * 7, [True] * 4 + [False] * 3])
+    corpus.role_embeddings[1, :4] = corpus.role_embeddings[0, :4]
+    splits = pd.DataFrame({"model_id": corpus.model_ids, "profile_hash": ["full-hash", "partial-hash"], "blind_fold": [0, 1]})
+    targets = pd.DataFrame({"model_id": corpus.model_ids, "score": [10.0, 20.0]})
+    _, _, audit = cross_validated_partial_performance_freeze(
+        corpus, splits, targets, ["score"], generation="modern", minimum_shared_roles=4,
+    )
+    assert not audit["exact_profile_cross_fold"].any()
+    assert audit["shared_role_exact_match_cross_fold"].all()
 
 
 def test_lineage_admits_only_mask_patterns_that_pass_calibration() -> None:

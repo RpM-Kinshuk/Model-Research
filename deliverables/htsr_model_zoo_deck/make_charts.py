@@ -251,7 +251,7 @@ def collection_sources(phase2: pd.DataFrame, ablation: pd.DataFrame) -> None:
                 "leaderboard_dataset": "Open LLM Leaderboard",
                 "hf_search": "targeted Hub search",
             },
-            "Phase 2: 15,000 models",
+            f"Phase 2: {len(phase2):,} selected records",
             BERKELEY,
         ),
         (
@@ -319,7 +319,7 @@ def model_type_distribution(phase2: pd.DataFrame, ablation: pd.DataFrame) -> Non
     ax.set_xlim(0, max(0.72, float(max(phase_shares.max(), ablation_shares.max())) * 1.08))
     ax.xaxis.set_major_formatter(lambda value, _: f"{value:.0%}")
     ax.set_xlabel("share of selected dataset")
-    ax.set_title("Model types differ by design", loc="left", fontsize=14, pad=10)
+    ax.set_title("Metadata selection buckets, not verified model types", loc="left", fontsize=12, pad=10)
     ax.legend(frameon=False, ncols=2, loc="lower right")
     clean_axis(ax, grid="x")
     finish(fig, "corpus_types.png")
@@ -431,10 +431,14 @@ def collection_summary(
     def positive_parameter_count(frame: pd.DataFrame) -> int:
         return int(pd.to_numeric(frame.get("#Params (B)"), errors="coerce").gt(0).sum())
 
+    def benchmark_count(frame: pd.DataFrame) -> int:
+        columns = [c for c in frame if c.startswith("Average")]
+        return int(frame[columns].apply(pd.to_numeric, errors="coerce").notna().any(axis=1).sum())
+
     return {
         "phase2": {
             "selected": int(len(phase2)),
-            "benchmark_rows": available_count(phase2, "eval_status", "eval_present"),
+            "benchmark_rows": benchmark_count(phase2),
             "lineage_metadata_rows": available_count(phase2, "lineage_status", "known"),
             "architecture_rows": int(phase_architecture.ne("Missing / unknown").sum()),
             "parameter_rows": positive_parameter_count(phase2),
@@ -442,7 +446,7 @@ def collection_summary(
         "ablation": {
             "candidates": int(ablation_summary["total_candidate_rows"]),
             "selected": int(len(ablation)),
-            "benchmark_rows": available_count(ablation, "eval_status", "eval_present"),
+            "benchmark_rows": benchmark_count(ablation),
             "complete_benchmark_rows": available_count(
                 ablation, "eval_coverage_flag", "complete"
             ),
@@ -522,12 +526,12 @@ def cluster_sizes(assignments: pd.DataFrame) -> None:
 
 def validation_agreement(metrics: pd.DataFrame) -> None:
     order = ["manual_confirmed", "metadata_root_consensus", "metadata_graph_root"]
-    labels = [
-        "Human-reviewed\n11 families",
-        "Metadata agreement\n11 families",
-        "Graph roots\n515 checkpoints",
-    ]
     data = metrics.set_index("label_source").loc[order]
+    labels = [
+        f"Human-reviewed\n{int(data.loc[order[0], 'n_families']):,} families",
+        f"Metadata agreement\n{int(data.loc[order[1], 'n_families']):,} families",
+        f"Graph roots\n{int(data.loc[order[2], 'n_families']):,} root IDs",
+    ]
     measures = [
         ("adjusted_rand", "ARI", BOOKING),
         ("normalized_mutual_information", "Shared information", DARTMOUTH),
@@ -550,7 +554,7 @@ def validation_agreement(metrics: pd.DataFrame) -> None:
     ax.set_xticks(x, labels)
     ax.set_ylim(0, 1.08)
     ax.set_ylabel("agreement with labels opened after prediction")
-    ax.set_title("Broad families align best with the 17 discovered groups", loc="left", fontsize=14)
+    ax.set_title("Broad families agree more than individual root IDs", loc="left", fontsize=14)
     ax.legend(frameon=False, ncols=3, loc="upper center")
     clean_axis(ax)
     finish(fig, "validation_agreement.png")
@@ -762,6 +766,104 @@ def json_safe(value):
     return value
 
 
+def reassessment_charts(parent: Path) -> tuple[dict, dict[str, pd.DataFrame]]:
+    override = os.environ.get("HTSR_REASSESSMENT_RUN")
+    candidates = [Path(override)] if override else sorted(
+        (ROOT/"research_runs/htsr_reassessment/runs").glob("reassessment_*"),
+        key=lambda p: p.stat().st_mtime_ns, reverse=True)
+    required = ("metadata.json", "performance_metrics.csv", "performance_task_metrics.csv",
+                "lineage_gallery_metrics.csv", "lineage_open_set_metrics.csv", "all_matrix_cluster_validation.csv")
+    for candidate in candidates:
+        try:
+            validate_artifact_manifest(candidate, required_files=required, expected_run_id=candidate.name)
+            metadata = json.loads((candidate/"metadata.json").read_text())
+            if Path(metadata["parent_run"]).resolve() == parent.resolve():
+                run = candidate
+                break
+        except (OSError, RuntimeError, ValueError):
+            continue
+    else:
+        raise FileNotFoundError("No complete reassessment with gallery and task checks matches the parent")
+    names = {"performance": "performance_metrics.csv", "tasks": "performance_task_metrics.csv",
+             "lineage_gallery": "lineage_gallery_metrics.csv", "open_set": "lineage_open_set_metrics.csv",
+             "all_matrix_clusters": "all_matrix_cluster_validation.csv"}
+    tables = {name: pd.read_csv(run/file) for name, file in names.items()}
+    audit_files = {"range_checks": "prediction_metrics_audit.csv",
+                   "collection_directions": "collection_direction_metrics.csv",
+                   "identity_summary": "identity_summary.csv", "gallery_ties": "gallery_tie_sensitivity.csv"}
+    audits = sorted((run/"audit").glob("audit_*"), key=lambda p: p.stat().st_mtime_ns, reverse=True)
+    for audit in audits:
+        try:
+            validate_artifact_manifest(audit, required_files=("summary.json", *audit_files.values()), expected_run_id=audit.name)
+            audit_metadata = json.loads((audit/"summary.json").read_text())
+            if Path(audit_metadata["reassessment_run"]).resolve() == run.resolve():
+                tables.update({key: pd.read_csv(audit/file) for key, file in audit_files.items()})
+                break
+        except (OSError, ValueError, RuntimeError):
+            continue
+    else:
+        raise FileNotFoundError("A completed reassessment audit is required for range and identity claims")
+    method_labels = {
+        "rank_knn3": "Alpha-rank\nneighbors", "matrix_shape_trees": "Matrix-shape\ntrees",
+        "nonalpha_spectral_trees": "Spectral trees\nwithout alpha", "role_spectral_trees": "Spectral trees\nwith alpha",
+        "nonalpha_spectral_ridge": "Spectral ridge\nwithout alpha", "training_median": "Training\nmedian",
+    }
+    for name, split, methods, title in (
+        ("review_performance.png", "near_group_0995",
+         ["rank_knn3", "matrix_shape_trees", "nonalpha_spectral_trees", "role_spectral_trees"],
+         "Near-matches kept together: adding alpha does not improve these trees"),
+        ("review_stress.png", "whole_weight_cluster",
+         ["rank_knn3", "nonalpha_spectral_trees", "nonalpha_spectral_ridge", "training_median"],
+         "An unseen weight group raises errors; linear spectral information still helps"),
+    ):
+        fig, axes = plt.subplots(1, 2, figsize=(10.8, 4.8))
+        for ax, generation in zip(axes, ("modern", "legacy")):
+            data = tables["performance"].query("population == 'matched_role_population' and generation == @generation and split == @split").set_index("method").loc[methods]
+            values = data.mae.to_numpy()
+            bars = ax.bar(range(len(methods)), values, color=[BOOKING, GRID, DARTMOUTH, GOLD], width=0.65)
+            for bar, value in zip(bars, values):
+                ax.text(bar.get_x()+bar.get_width()/2, value+max(values)*0.025, f"{value:.2f}", ha="center", color=INK, weight="bold", fontsize=10)
+            ax.set_xticks(range(len(methods)), [method_labels[m] for m in methods], fontsize=9)
+            ax.set_ylim(0, max(values)*1.2)
+            ax.set_ylabel("Mean absolute score error")
+            ax.set_title(f"{generation.title()} | {int(data.n_models.iloc[0]):,} models", loc="left", fontsize=12)
+            clean_axis(ax)
+        fig.suptitle(title, fontsize=12, x=0.02, y=1.03, ha="left", color=INK, weight="bold")
+        finish(fig, name)
+
+    gallery = tables["lineage_gallery"].query("cohort == 'common_queries_and_gallery'").set_index("method")
+    fig, ax = plt.subplots(figsize=(9.2, 4.8))
+    x = np.arange(3)
+    for offset, method, label, color in (
+        (-0.18, "parent_rank32_dks", "DKS-alpha ranks", BOOKING),
+        (0.18, "trace_sqrt_norm_pearson", "Trace: layer-wise norms", DARTMOUTH),
+    ):
+        values = gallery.loc[method, ["micro_top1", "root_macro_top1", "micro_top3"]].to_numpy(float)
+        bars = ax.bar(x+offset, values, width=0.34, label=label, color=color)
+        for bar, value in zip(bars, values):
+            ax.text(bar.get_x()+bar.get_width()/2, value+0.015, f"{value:.2%}", ha="center", fontsize=10, weight="bold", color=INK)
+    ax.set_xticks(x, ["First choice correct", "First choice: equal\nweight per base", "Root in first three"])
+    ax.set_ylim(0, 1.18)
+    ax.yaxis.set_major_formatter(lambda value, _: f"{value:.0%}")
+    ax.legend(frameon=False, loc="upper center", ncols=2)
+    ax.set_title(f"Same {int(gallery.n_present.iloc[0]):,} scored queries and {int(gallery.candidate_count.iloc[0]):,} candidate bases", loc="left", fontsize=13)
+    clean_axis(ax)
+    finish(fig, "review_gallery.png")
+
+    tasks = tables["tasks"].query("generation == 'modern' and split == 'near_group_0995' and method == 'role_spectral_trees'").sort_values("mae")
+    fig, ax = plt.subplots(figsize=(8, 4.7))
+    bars = ax.barh(tasks.target, tasks.mae, color=[BOOKING]*(len(tasks)-1)+[GOLD], height=0.6)
+    for bar, value in zip(bars, tasks.mae):
+        ax.text(value+0.15, bar.get_y()+bar.get_height()/2, f"{value:.2f}", va="center", color=INK, weight="bold")
+    ax.set_xlim(0, tasks.mae.max()*1.2)
+    ax.set_xlabel("Mean absolute error: individual task, 0-100 score")
+    ax.set_title("Combined spectral trees: modern tasks differ in difficulty", loc="left", fontsize=12)
+    clean_axis(ax, grid="x")
+    finish(fig, "review_tasks.png")
+    return {"run_id": run.name, "counts": metadata["counts"], **{
+        name: table.to_dict("records") for name, table in tables.items()}}, tables
+
+
 def main() -> None:
     setup()
     run = select_run()
@@ -805,6 +907,7 @@ def main() -> None:
     prediction_scatter(
         performance_predictions, hard_predictions, leading_method
     )
+    reassessment, reassessment_tables = reassessment_charts(run)
 
     summary = json_safe(
         {
@@ -821,6 +924,7 @@ def main() -> None:
             "role_masking": masking.to_dict(orient="records"),
             "role_coverage_selection": coverage_selection.to_dict(orient="records"),
             "collections": collections,
+            "reassessment": reassessment,
         }
     )
     (OUT / "chart_data.json").write_text(
@@ -845,6 +949,8 @@ def main() -> None:
             pd.DataFrame(collections).T.to_excel(
                 writer, sheet_name="collection_summary"
             )
+            for name, table in reassessment_tables.items():
+                table.to_excel(writer, sheet_name=("review_"+name)[:31], index=False)
         workbook_written = True
     except ImportError:
         (HERE / "htsr_study_data.xlsx").unlink(missing_ok=True)

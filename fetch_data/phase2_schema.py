@@ -24,6 +24,22 @@ TYPE_TARGET_WEIGHTS = {
 }
 
 
+def first_architecture(value: object) -> str | None:
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    if isinstance(value, str):
+        return value.strip() or None
+    return None
+
+
+def _is_multimodal(row: pd.Series) -> bool:
+    # ConditionalGeneration also names text-only models such as T5 and BART.
+    return _lower_value(row, "pipeline_tag") in {
+        "image-text-to-text", "image-to-text", "visual-question-answering",
+        "document-question-answering", "video-text-to-text", "audio-text-to-text",
+    } or bool(_tag_tokens(row) & {"vision", "vision-language", "multimodal"})
+
+
 def parse_repo_and_revision(model_id: object) -> tuple[str | None, str | None]:
     if pd.isna(model_id):
         return None, None
@@ -154,7 +170,7 @@ def classify_primary_type(row: pd.Series) -> str:
     tags = _tag_tokens(row)
     files = {str(item).lower() for item in row.get("files", [])}
 
-    if pipeline_tag == "image-text-to-text" or "conditionalgeneration" in architecture:
+    if _is_multimodal(row):
         return "multimodal"
     if relation in {"adapter", "lora", "peft"} or "adapter_config.json" in files or tags & {"adapter", "peft", "lora"}:
         return "adapter"
@@ -191,7 +207,7 @@ def classify_loader_scenario_from_row(row: pd.Series) -> str:
         return "adapter_requires_base"
     if any(name.endswith(".gguf") for name in files):
         return "quantized_alt_format"
-    if row.get("pipeline_tag") == "image-text-to-text" or "conditionalgeneration" in architecture:
+    if _is_multimodal(row):
         return "multimodal_transformers"
     if any(method in str(row.get("quant_method", "")).lower() for method in KNOWN_QUANT_METHODS):
         return "quantized_transformers_native"
@@ -212,7 +228,7 @@ def load_atlas_candidates(atlas_json_path: Path) -> pd.DataFrame:
                 "source_model": attrs.get("base_model_clean"),
                 "base_model_relation": attrs.get("base_model_relation", "unknown"),
                 "pipeline_tag": attrs.get("pipeline_tag"),
-                "Architecture": architectures[0] if architectures else None,
+                "Architecture": first_architecture(architectures),
                 "tags": attrs.get("tags", []),
             }
         )

@@ -26,6 +26,7 @@ from sklearn.metrics import (
 from sklearn.neighbors import NearestNeighbors
 
 from .features import CANONICAL_ROLES
+from .contracts import file_digest
 from .lineage import _signature_matrix
 
 
@@ -58,6 +59,12 @@ def build_rank_profile_cache(
         "grid_size": int(grid_size),
         "source_digest": source_digest,
         "model_ids": requested,
+        "trajectory_sha256": file_digest(trajectory_path),
+        "role_vocabulary": list(CANONICAL_ROLES),
+        "implementation_sha256": {
+            name: file_digest(Path(__file__).with_name(name))
+            for name in ("weight_only.py", "lineage.py", "features.py")
+        },
     }
     cache_path = cache_root / f"{source_name}_{_content_key(payload)}.npz"
     if cache_path.is_file():

@@ -42,7 +42,7 @@ pptx.defineLayout({ name: "MODEL_WIDE", width: W, height: H });
 pptx.layout = "MODEL_WIDE";
 pptx.author = "Model Research";
 pptx.company = "Model Research";
-pptx.subject = "Metadata-isolated HTSR lineage and performance study";
+pptx.subject = "Exploratory audit of weight-derived grouping, base retrieval, and performance controls";
 pptx.title = "Model weights as evidence";
 pptx.lang = "en-US";
 pptx.theme = { headFontFace: DISPLAY, bodyFontFace: FONT, lang: "en-US" };
@@ -51,7 +51,24 @@ const counts = DATA.counts;
 const coverage = DATA.profile_sources;
 const collections = DATA.collections;
 const internal = DATA.internal;
-const gallery = DATA.gallery;
+const REVIEW = DATA.reassessment;
+const REVIEW_FIELDS = {
+  performance: ["population", "generation", "split", "method", "n_models", "mae"],
+  tasks: ["population", "generation", "split", "method", "target", "mae"],
+  lineage_gallery: ["cohort", "method", "candidate_count", "n_present", "n_absent_operator", "n_supplied_unprofiled", "micro_top1"],
+  open_set: ["cohort", "method", "contrast", "signal", "auroc"],
+  all_matrix_clusters: ["label_source", "adjusted_rand"],
+};
+if (!REVIEW || typeof REVIEW.run_id !== "string" || !REVIEW.run_id.trim()
+    || !Number.isFinite(REVIEW.counts?.all_matrix_alpha_models)) {
+  throw new Error("chart_data.json requires DATA.reassessment.run_id and all-matrix coverage counts");
+}
+for (const [table, fields] of Object.entries(REVIEW_FIELDS)) {
+  if (!Array.isArray(REVIEW[table]) || !REVIEW[table].length
+      || REVIEW[table].some((row) => !row || fields.some((field) => row[field] === undefined))) {
+    throw new Error(`DATA.reassessment.${table} requires rows with: ${fields.join(", ")}`);
+  }
+}
 const manual = DATA.validation.find((row) => row.label_source === "manual_confirmed");
 const consensus = DATA.validation.find(
   (row) => row.label_source === "metadata_root_consensus"
@@ -72,9 +89,36 @@ function pct(value, digits = 1) {
   return `${(100 * Number(value)).toFixed(digits)}%`;
 }
 
-function perf(scope, generation, kind = "knn") {
-  return DATA.performance[scope][generation][kind];
+function reviewRow(table, fields) {
+  const rows = REVIEW[table].filter((row) =>
+    Object.entries(fields).every(([key, value]) => row[key] === value)
+  );
+  if (rows.length !== 1) {
+    throw new Error(`Expected one ${table} row: ${JSON.stringify(fields)}`);
+  }
+  return rows[0];
 }
+
+function reviewPerf(generation, method, split = "near_group_0995") {
+  return reviewRow("performance", {
+    population: "matched_role_population", generation, split, method,
+  });
+}
+
+function reviewGallery(method) {
+  return reviewRow("lineage_gallery", { cohort: "common_queries_and_gallery", method });
+}
+
+function reviewAuc(method, signal) {
+  return reviewRow("open_set", {
+    cohort: "common_queries_and_gallery", method, signal,
+    contrast: "profiled_root_vs_all_unavailable",
+  }).auroc;
+}
+
+const rankGallery = reviewGallery("parent_rank32_dks");
+const traceGallery = reviewGallery("trace_sqrt_norm_pearson");
+const allMatrixManual = reviewRow("all_matrix_clusters", { label_source: "manual_confirmed" });
 
 function addText(slide, text, x, y, w, h, options = {}) {
   slide.addText(text, {
@@ -258,7 +302,7 @@ function baseSlide(kicker, title, accent, page, source) {
     fontSize: 9,
     bold: true,
     color: accent,
-    charSpacing: 1.1,
+    charSpacing: 0,
   });
   addText(slide, title, 0.58, 0.49, 12.15, 0.46, {
     fontFace: DISPLAY,
@@ -316,7 +360,7 @@ function baseSlide(kicker, title, accent, page, source) {
     fontSize: 10,
     bold: true,
     color: C.gold,
-    charSpacing: 1.5,
+    charSpacing: 0,
   });
   addText(slide, "Model weights\nas evidence", 0.72, 1.18, 7.2, 1.52, {
     fontFace: DISPLAY,
@@ -326,7 +370,7 @@ function baseSlide(kicker, title, accent, page, source) {
   });
   addText(
     slide,
-    "Lineage grouping and performance prediction without descriptive metadata",
+    "Exploratory audit: weight grouping, base retrieval, and performance controls",
     0.75,
     3.03,
     7.55,
@@ -337,17 +381,17 @@ function baseSlide(kicker, title, accent, page, source) {
   addStat(slide, n(counts.unlabelled_clusters), "weight-derived groups", 3.36, 4.45, 2.15, C.cyan, "selected without labels", true);
   addStat(
     slide,
-    f(perf("interpolation", "modern").model_weighted_mae, 2),
-    "modern score error",
+    f(reviewPerf("modern", "nonalpha_spectral_trees").mae, 2),
+    "non-alpha modern MAE",
     5.92,
     4.45,
     2.0,
     "7ACBA5",
-    "each model tested once",
+    "near-group held-out audit",
     true
   );
   addCoverArtwork(slide);
-  addText(slide, `Completed run: ${DATA.run_id}`, 0.75, 6.93, 7.4, 0.18, {
+  addText(slide, `Exploratory reassessment: ${REVIEW.run_id}`, 0.75, 6.93, 7.4, 0.18, {
     fontSize: 7.8,
     color: "B9C5D6",
   });
@@ -357,10 +401,10 @@ function baseSlide(kicker, title, accent, page, source) {
 {
   const slide = baseSlide(
     "STUDY BOUNDARY",
-    "Make predictions first; use descriptive metadata only to check them",
+    "Keep predictor inputs separate from evaluation labels",
     C.berkeley,
     2,
-    `Source: ${DATA.run_id}/metadata.json`
+    `Sources: ${REVIEW.run_id}/protocol.json; parent prediction freezes`
   );
   const columns = [
     {
@@ -384,7 +428,7 @@ function baseSlide(kicker, title, accent, page, source) {
       color: "9A6A00",
       fill: C.goldLight,
       title: "Performance",
-      input: "available roles + training scores",
+      input: "matrix summaries + training scores",
       output: "held-out score estimates",
     },
   ];
@@ -414,7 +458,7 @@ function baseSlide(kicker, title, accent, page, source) {
   });
   addBox(
     slide,
-    "OPEN ONLY AFTER PREDICTION  |  lineage · family · architecture · model type · parameter count · source · ancestry graph · held-out score",
+    "EVALUATION ONLY  |  declared source roots and family labels score frozen lineage predictions; held-out benchmark scores score predictions",
     0.62,
     5.13,
     11.72,
@@ -430,11 +474,11 @@ function baseSlide(kicker, title, accent, page, source) {
   );
   addText(
     slide,
-    "Model IDs only join files. The base-candidate list defines the possible answers, as it does in the reference paper.",
+    "Collection metadata shaped selection; collection IDs define one holdout. IDs join records and break ties, not predictor features. This is exploratory reuse, not untouched confirmation.",
     0.66,
     6.15,
     11.65,
-    0.42,
+    0.54,
     { fontSize: 10.3, color: C.muted, align: "center" }
   );
 }
@@ -446,7 +490,7 @@ function baseSlide(kicker, title, accent, page, source) {
     "Four phases, each ending in a checked output",
     C.berkeley,
     3,
-    "Sources: collection code, completed weight-only run, and post-prediction validation tables."
+    "Sources: collection code, parent weight-only run, and exploratory reassessment protocol."
   );
   const phases = [
     {
@@ -454,7 +498,7 @@ function baseSlide(kicker, title, accent, page, source) {
       number: "1",
       title: "Assemble model lists",
       detail: "Phase 2 and ablation IDs\ncanonicalize and remove duplicates",
-      output: "19,713 distinct models",
+      output: `${n(collections.phase2.selected + collections.ablation.selected)} selected records`,
       color: C.booking,
       fill: C.bookingLight,
     },
@@ -480,7 +524,7 @@ function baseSlide(kicker, title, accent, page, source) {
       x: 9.95,
       number: "4",
       title: "Validate",
-      detail: "open provenance and held-out scores\nmeasure agreement and error",
+      detail: "score against declared source links\nmeasure held-out benchmark error",
       output: "reported results and limits",
       color: "9A6A00",
       fill: C.goldLight,
@@ -523,7 +567,7 @@ function baseSlide(kicker, title, accent, page, source) {
   });
   addBox(
     slide,
-    "The predictor sees model weights, the fixed candidate-base list, and training benchmark scores. Descriptive metadata is opened only in phase 4.",
+    "Predictor features come from saved weights; score fitting uses training outcomes. Collection metadata shaped curation and one holdout, so the full process is not metadata-free.",
     0.72,
     5.55,
     11.9,
@@ -557,7 +601,7 @@ function baseSlide(kicker, title, accent, page, source) {
   });
   const phase2Steps = [
     "Combine the Model Atlas graph, sampled records, leaderboard rows, and targeted Hub searches.",
-    "Normalize owner/repository and revision; keep one row per canonical checkpoint.",
+    "Normalize repository IDs and declared revision fields; the analyzed checkpoint revision is not verified.",
     "Fill model-type quotas while balancing score and lineage availability; favor rows with existing weight results.",
   ];
   phase2Steps.forEach((item, index) =>
@@ -616,7 +660,7 @@ function baseSlide(kicker, title, accent, page, source) {
   );
   addBox(
     slide,
-    "Collection metadata shapes coverage. It is removed before lineage grouping and is not used as a performance feature.",
+    "Collection metadata shapes coverage. Predictor features exclude these labels, but source selection and joins remain part of the evidence boundary.",
     0.62,
     5.14,
     6.82,
@@ -636,7 +680,7 @@ function baseSlide(kicker, title, accent, page, source) {
 {
   const slide = baseSlide(
     "DATASET DISTRIBUTION",
-    "Phase 2 is broad; ablation is benchmark-heavy",
+    "Selection buckets describe curation; ablation is benchmark-heavy",
     C.dartmouth,
     5,
     "Sources: completed run's Phase 2 and ablation source tables; architecture graph used descriptively after selection."
@@ -645,7 +689,7 @@ function baseSlide(kicker, title, accent, page, source) {
   addImage(slide, "corpus_architectures.png", 6.72, 1.17, 6.15, 3.82);
   addBox(
     slide,
-    `PHASE 2 · ${n(collections.phase2.selected)}\n${n(collections.phase2.benchmark_rows)} benchmark scores · ${n(collections.phase2.lineage_metadata_rows)} lineage records\n${n(collections.phase2.architecture_rows)} architecture labels · ${n(collections.phase2.parameter_rows)} parameter counts`,
+    `PHASE 2 · ${n(collections.phase2.selected)}\n${n(collections.phase2.benchmark_rows)} average-score records · ${n(collections.phase2.lineage_metadata_rows)} declared source links\n${n(collections.phase2.architecture_rows)} architecture labels · ${n(collections.phase2.parameter_rows)} parameter counts`,
     0.62,
     5.22,
     5.82,
@@ -661,7 +705,7 @@ function baseSlide(kicker, title, accent, page, source) {
   );
   addBox(
     slide,
-    `ABLATION · ${n(collections.ablation.selected)}\n${n(collections.ablation.benchmark_rows)} benchmark scores · ${n(collections.ablation.lineage_metadata_rows)} lineage records\n${n(collections.ablation.architecture_rows)} architecture labels · ${n(collections.ablation.parameter_rows)} parameter counts`,
+    `ABLATION · ${n(collections.ablation.selected)}\n${n(collections.ablation.benchmark_rows)} average-score records · ${n(collections.ablation.lineage_metadata_rows)} declared source links\n${n(collections.ablation.architecture_rows)} architecture labels · ${n(collections.ablation.parameter_rows)} parameter counts`,
     6.88,
     5.22,
     5.82,
@@ -677,7 +721,7 @@ function baseSlide(kicker, title, accent, page, source) {
   );
   addText(
     slide,
-    "Type and architecture labels describe the datasets only. 'Other labelled' combines lower-count architecture families.",
+    "Type-chart categories are selection buckets, not verified model types. Source links are declared, not verified ancestry; architecture labels are descriptive.",
     0.72,
     6.38,
     11.9,
@@ -765,7 +809,7 @@ function baseSlide(kicker, title, accent, page, source) {
   );
   addBox(
     slide,
-    "Source labels explain coverage here. They are removed before clustering, candidate-base matching, and performance prediction.",
+    "These are parent role-profile counts. The reassessment also uses all-matrix summaries; source IDs define the collection holdout, not predictor features.",
     0.72,
     6.05,
     11.85,
@@ -839,7 +883,7 @@ function baseSlide(kicker, title, accent, page, source) {
   });
   addText(
     slide,
-    "Stored DKS alpha · depth scaled to [0,1] · 32 positions per observed role · within-role ranks · compare only shared roles",
+    "Custom stored DKS alpha, not a WeightWatcher run · depth scaled to [0,1] · 32 positions per observed role · within-role ranks for grouping",
     0.68,
     4.48,
     5.78,
@@ -853,7 +897,7 @@ function baseSlide(kicker, title, accent, page, source) {
   });
   addText(
     slide,
-    "Fixed-tail Hill alpha, k=n/2 · role-wise Spearman · z-scored injective order-preserving dynamic programming when depths differ",
+    "Fixed-tail Hill alpha, k=n/2 · raw-alpha clustering · role-wise Spearman similarity · order-preserving DP for unequal depths · MoE experts averaged",
     6.88,
     4.48,
     5.78,
@@ -862,7 +906,7 @@ function baseSlide(kicker, title, accent, page, source) {
   );
   addBox(
     slide,
-    "Same scientific idea; different alpha estimator and unequal-depth calculation. Numerical results are not an exact replication.",
+    "Ranks discard alpha offsets, scales, and spacing, but retain order. Absolute alpha and other saved matrix statistics can still carry performance signal.",
     0.68,
     5.92,
     11.98,
@@ -882,18 +926,18 @@ function baseSlide(kicker, title, accent, page, source) {
 {
   const slide = baseSlide(
     "DATA",
-    "Seven roles define the paper-comparison core, not general eligibility",
+    "Role coverage and all-matrix coverage answer different questions",
     C.booking,
     8,
-    `Sources: ${DATA.run_id}/population_ledger.csv and metadata.json`
+    `Sources: parent population_ledger.csv; ${REVIEW.run_id}/metadata.json and all_matrix_cluster_validation.csv`
   );
   addImage(slide, "corpus_coverage.png", 0.52, 1.24, 8.05, 5.55);
   addStat(slide, n(counts.strict_seven_role_models), "strict seven-role core", 8.92, 1.37, 2.9, C.berkeley);
   addStat(slide, n(counts.lineage_models), "lineage assignments", 8.92, 2.62, 2.9, C.booking);
   addStat(
     slide,
-    n(counts.performance_profiled_models),
-    "performance profiles",
+    n(REVIEW.counts.all_matrix_alpha_models),
+    "all-matrix alpha eligible",
     8.92,
     3.87,
     2.7,
@@ -901,11 +945,11 @@ function baseSlide(kicker, title, accent, page, source) {
   );
   addBox(
     slide,
-    `Partial lineage patterns must retain the complete-profile nearest model in the top ten at least 90% of the time. Performance accepts the label-free ${n(counts.minimum_usable_roles)}-role cutoff and requires every neighbor to share that many roles.`,
+    `Broader eligibility does not imply better grouping. All-matrix family ARI ${f(allMatrixManual.adjusted_rand)} vs rank ${f(manual.adjusted_rand)} on human-reviewed labels; populations differ.`,
     8.82,
     5.28,
     3.45,
-    0.75,
+    1.03,
     {
       fill: C.surface,
       line: C.line,
@@ -933,7 +977,7 @@ function baseSlide(kicker, title, accent, page, source) {
   addStat(slide, f(internal.davies_bouldin_euclidean, 3), "within/between spread", 10.67, 3.08, 1.82, C.muted, "lower is better");
   addBox(
     slide,
-    `HOW 17 WAS CHOSEN\n\nFit candidate counts on\n${n(internal.n_core_models)} complete profiles\n\nKeep the count with\nthe best separation`,
+    `HOW ${n(counts.unlabelled_clusters)} WAS CHOSEN\n\nFit candidate counts on\n${n(internal.n_core_models)} complete profiles\n\nKeep the count with\nthe best separation`,
     8.72,
     4.7,
     3.77,
@@ -959,21 +1003,21 @@ function baseSlide(kicker, title, accent, page, source) {
 {
   const slide = baseSlide(
     "VALIDATION AFTER PREDICTION",
-    "Compare the 17 weight-derived groups with three independent label sets",
+    "Validate grouping against overlapping, imperfect label views",
     C.dartmouth,
     10,
-    `Sources: ${DATA.run_id}/lineage_validation_metrics.csv and lineage_cluster_assignments.csv`
+    `Sources: parent lineage_validation_metrics.csv; ${REVIEW.run_id}/all_matrix_cluster_validation.csv`
   );
-  addImage(slide, "validation_agreement.png", 0.42, 1.26, 7.28, 4.82);
+  addImage(slide, fs.existsSync(ASSET("review_clustering.png")) ? "review_clustering.png" : "validation_agreement.png", 0.42, 1.26, 7.28, 4.82);
   addText(slide, "LABELS OPENED AFTER GROUPING", 7.96, 1.37, 4.5, 0.24, {
     fontSize: 10,
     bold: true,
     color: C.dartmouth,
   });
   const labelSets = [
-    ["Human-reviewed", `${n(manual.n_models)} models assigned to 11 broad base families by manual review.`, C.bookingLight, C.booking],
-    ["Metadata agreement", `${n(consensus.n_models)} models assigned to 11 broad families when metadata rules agree.`, C.dartmouthLight, C.dartmouth],
-    ["Graph roots", `${n(graphRoot.n_models)} models traced to ${n(graphRoot.n_families)} individual root checkpoints in the provenance graph.`, C.goldLight, "9A6A00"],
+    ["Human-reviewed", `${n(manual.n_models)} models assigned to ${n(manual.n_families)} broad base families by manual review.`, C.bookingLight, C.booking],
+    ["Metadata agreement", `${n(consensus.n_models)} models assigned to ${n(consensus.n_families)} broad families when metadata rules agree.`, C.dartmouthLight, C.dartmouth],
+    ["Declared roots", `${n(graphRoot.n_models)} models linked to ${n(graphRoot.n_families)} graph-component roots; not verified historical ancestry.`, C.goldLight, "9A6A00"],
   ];
   labelSets.forEach(([title, detail, fill, line], index) => {
     const y = 1.82 + index * 1.19;
@@ -1014,67 +1058,70 @@ function baseSlide(kicker, title, accent, page, source) {
 {
   const slide = baseSlide(
     "KNOWN-CANDIDATE LINEAGE TEST",
-    "Match each model against a fixed list of known base checkpoints",
+    "Base matching depends on the comparison and treatment of ties",
     C.berkeley,
     11,
-    `Sources: ${DATA.run_id}/lineage_gallery_metrics.csv; reference paper Sec. 5.2 and 5.4`
+    `Sources: ${REVIEW.run_id}/lineage_gallery_metrics.csv; audit/gallery_tie_sensitivity.csv. Trace: arxiv.org/html/2608.07786v1`
   );
-  addImage(slide, "gallery_accuracy.png", 0.42, 1.26, 7.55, 5.35);
-  addStat(slide, `${n(gallery.n_profiled_roots)} / ${n(gallery.n_supplied_roots)}`, "available / supplied bases", 8.35, 1.42, 1.95, C.berkeley);
-  addStat(slide, n(gallery.n_scored_queries), "models scored", 10.62, 1.42, 1.65, C.booking);
-  addStat(slide, pct(gallery.micro_top1, 2), "top choice correct", 8.35, 2.91, 1.95, C.dartmouth, "across all models");
-  addStat(slide, pct(gallery.root_macro_top1, 2), "top choice correct", 10.62, 2.91, 1.72, "9A6A00", "each base weighted equally");
+  addImage(slide, "review_gallery.png", 0.42, 1.26, 7.55, 5.12);
+  addStat(slide, `${n(traceGallery.candidate_count)} / ${n(DATA.gallery.n_supplied_roots)}`, "available / supplied bases", 8.35, 1.42, 1.95, C.berkeley);
+  addStat(slide, n(traceGallery.n_present), "matched known-root queries", 10.62, 1.42, 1.98, C.booking);
+  addStat(slide, pct(rankGallery.micro_top1, 2), "rank top-1", 8.35, 2.8, 1.95, C.booking);
+  addStat(slide, pct(traceGallery.micro_top1, 2), "Trace top-1", 10.62, 2.8, 1.98, C.dartmouth);
   addBox(
     slide,
-    "The possible answers are fixed before prediction. A model is compared with all 29 available base profiles and the bases are ranked by similarity.",
+    "Trace compares weight magnitude through layers, averaging seven role-wise correlations. Its first-choice gain is sensitive to tied candidates; the full and tie-excluded subsets answer different questions.",
     8.35,
-    4.36,
+    4.03,
     4.02,
-    1.02,
+    1.2,
     {
       fill: C.bookingLight,
       line: C.booking,
       color: C.ink,
-      fontSize: 10.5,
+      fontSize: 10,
       bold: true,
       align: "center",
     }
   );
   addBox(
     slide,
-    "A base outside this candidate list cannot be selected. Provenance is opened afterward only to score the ranking.",
+    `${n(traceGallery.n_absent_operator)} other labeled queries have a root absent from the supplied list; ${n(traceGallery.n_supplied_unprofiled)} have a listed root without usable measurements. These are queries, not additional candidate bases.`,
     8.35,
-    5.68,
+    5.48,
     4.02,
-    0.72,
+    1.0,
     {
       fill: C.riskLight,
       line: C.risk,
       color: C.risk,
-      fontSize: 10.2,
+      fontSize: 9.8,
       bold: true,
       align: "center",
     }
   );
+  addText(slide, `After excluding exact ties in either method: rank ${pct(reviewRow("gallery_ties", {cohort: "neither_method_has_exact_tie", method: "parent_rank32_dks"}).micro_top1, 2)}, Trace ${pct(reviewRow("gallery_ties", {cohort: "neither_method_has_exact_tie", method: "trace_sqrt_norm_pearson"}).micro_top1, 2)}. This changes the model/root mix; equal-weight-per-root accuracy still favors Trace.`, 0.66, 6.48, 7.24, 0.42, {
+    fontSize: 9.2, color: C.risk, bold: true,
+  });
 }
 
 // 12. Paper comparison
 {
   const slide = baseSlide(
     "PAPER COMPARISON",
-    "The evaluation boundary matches; the estimator and scale do not",
+    "Our larger study is not an exact replication",
     C.gold,
     12,
-    "Paper: arXiv:2607.03377v1. Current metrics: lineage_gallery_metrics.csv."
+    `Sources: arxiv.org/html/2607.03377v1, Sec. 4.2 and 5.3; ${REVIEW.run_id}/protocol.json`
   );
   const rows = [
-    ["Dimension", "Reference paper", "Current study"],
-    ["Model selection", "Public provenance", "Fixed candidate list + labels opened afterward"],
-    ["Queries / bases", "128 / 8", `${n(gallery.n_scored_queries)} / ${n(gallery.n_profiled_roots)} profiled`],
-    ["Prediction input", "Weights only", "Weights only"],
-    ["Alpha", "Fixed-tail Hill", "Stored DKS"],
-    ["Unequal depth", "Z-score + order-preserving dynamic programming", "32-point normalized-depth interpolation"],
-    ["Overall top-1", "98.44%", pct(gallery.micro_top1, 2)],
+    ["Dimension", "Spectral Signatures paper", "Exploratory reassessment"],
+    ["Prediction boundary", "Weight similarities; training scores for prediction", "Weight features; training-only score fitting"],
+    ["Alpha estimator", "Fixed-tail Hill, k = n/2", "Custom stored DKS; not WeightWatcher or fixed Hill"],
+    ["Grouping / similarity", "Flattened raw alpha / role-wise Spearman", "Rank grouping retained; separate Trace base test"],
+    ["Unequal depth", "Z-score + order-preserving matching", "Ranks: 32-point interpolation; Trace: pair-max depth"],
+    ["Performance setup", "Five folds stated; 100 half-splits in results", "Five fixed near-group parts; explicit stress splits"],
+    ["Scope of comparison", "Different candidates, cohorts and targets", "No matched replication; no claim to beat the paper"],
   ];
   const x = [0.62, 3.3, 7.78];
   const w = [2.68, 4.48, 4.92];
@@ -1096,7 +1143,7 @@ function baseSlide(kicker, title, accent, page, source) {
   });
   addBox(
     slide,
-    "Do not interpret the accuracy gap as an estimator ranking: the candidate sets, labels, coverage, alpha fit, and depth handling differ.",
+    "The paper's split-description discrepancy is unresolved. Neither its accuracy nor our MAE establishes superiority across different populations and protocols.",
     0.68,
     6.35,
     11.98,
@@ -1116,10 +1163,10 @@ function baseSlide(kicker, title, accent, page, source) {
 {
   const slide = baseSlide(
     "PERFORMANCE METHOD",
-    "Every scored model is tested using models outside its test part",
+    "Keep similar models together in five test parts",
     C.booking,
     13,
-    `Sources: ${DATA.run_id}/performance_frozen_splits.csv and performance_prediction_freeze.csv`
+    `Sources: ${REVIEW.run_id}/protocol.json, splits.csv and performance_predictions.csv`
   );
   addText(slide, "BUILD FIVE TEST PARTS", 0.72, 1.34, 4.2, 0.26, {
     fontSize: 10,
@@ -1127,9 +1174,9 @@ function baseSlide(kicker, title, accent, page, source) {
     color: C.booking,
   });
   const setupSteps = [
-    ["Group identical\nobserved-role summaries", C.bookingLight, C.booking],
-    ["Divide those groups\ninto five parts", C.surface, C.muted],
-    ["Save the division\nbefore prediction", C.dartmouthLight, C.dartmouth],
+    ["Connect near profiles\nsimilarity >= 0.995", C.bookingLight, C.booking],
+    ["Keep each group intact\nin five fixed parts", C.surface, C.muted],
+    ["Freeze the same splits\nfor predictor contrasts", C.dartmouthLight, C.dartmouth],
   ];
   setupSteps.forEach(([label, fill, line], index) => {
     const x = 0.76 + index * 4.13;
@@ -1151,8 +1198,8 @@ function baseSlide(kicker, title, accent, page, source) {
   const testSteps = [
     ["Hold out\n1 part", C.goldLight, "9A6A00"],
     ["Use the other\n4 parts", C.dartmouthLight, C.dartmouth],
-    ["Find 3 closest\ntraining models", C.bookingLight, C.booking],
-    ["Predict a weighted\nscore average", C.surface, C.muted],
+    ["Fit preprocessing\non training rows only", C.bookingLight, C.booking],
+    ["Fit fixed trees / ridge\nor rank 3-neighbor model", C.surface, C.muted],
     ["Open the held-out\nscore and measure error", C.riskLight, C.risk],
   ];
   testSteps.forEach(([label, fill, line], index) => {
@@ -1167,7 +1214,7 @@ function baseSlide(kicker, title, accent, page, source) {
     });
     if (index < 4) addArrow(slide, x + 2.12, 4.13, 0.27, line);
   });
-  addBox(slide, "A fold is one of the five parts. Each part takes one turn as the held-out test set.", 0.76, 5.25, 5.75, 0.66, {
+  addBox(slide, "Fixed trees: 200 iterations, 15 leaves, rate 0.05, L2=10, minimum leaf=20. Ridge penalty=100; no held-out tuning.", 0.76, 5.25, 5.75, 0.84, {
     fill: C.bookingLight,
     line: C.booking,
     color: C.ink,
@@ -1175,7 +1222,7 @@ function baseSlide(kicker, title, accent, page, source) {
     bold: true,
     align: "center",
   });
-  addBox(slide, "Identical summaries stay together. Closer spectral matches receive more weight.", 6.8, 5.25, 5.75, 0.66, {
+  addBox(slide, "Controls: shape, non-alpha spectra, combined spectra, and rank neighbors. Average-score targets and individual tasks are evaluated separately.", 6.8, 5.25, 5.75, 0.84, {
     fill: C.dartmouthLight,
     line: C.dartmouth,
     color: C.ink,
@@ -1185,63 +1232,49 @@ function baseSlide(kicker, title, accent, page, source) {
   });
   addText(
     slide,
-    "Modern and legacy benchmark sets are trained and evaluated separately. Descriptive metadata is never a predictor input.",
+    "Training scores are permitted; held-out scores are for evaluation. Collection labels define one stress split. Previously studied data: exploratory, not untouched confirmation.",
     0.72,
-    6.31,
+    6.39,
     11.9,
-    0.3,
+    0.43,
     { fontSize: 10.2, color: C.muted, align: "center" }
   );
 }
 
-// 14. Interpolation
+// 14. Matched performance controls and individual tasks
 {
   const slide = baseSlide(
-    "PERFORMANCE RESULTS",
-    "Nearest spectral neighbors predict well when similar models are represented",
+    "PERFORMANCE CONTROLS",
+    "Alpha does not improve the key performance controls",
     C.booking,
     14,
-    `Source: ${DATA.run_id}/performance_metrics.csv`
+    `Sources: ${REVIEW.run_id}/performance_metrics.csv and performance_task_metrics.csv; near_group_0995, matched_role_population`
   );
-  addImage(slide, "performance_interpolation.png", 0.48, 1.22, 8.05, 5.62);
-  const modern = perf("interpolation", "modern");
-  const legacy = perf("interpolation", "legacy");
-  addText(slide, "Modern", 8.8, 1.39, 1.7, 0.3, {
-    fontSize: 15,
-    bold: true,
-    color: C.booking,
+  addImage(slide, "review_performance.png", 0.42, 1.22, 7.44, 4.76);
+  addImage(slide, "review_tasks.png", 8.03, 1.26, 4.74, 3.71);
+  const pair = (method) => ["modern", "legacy"].map((generation) => f(reviewPerf(generation, method).mae)).join(" / ");
+  addBox(slide, `AVERAGE-SCORE MAE: MODERN / LEGACY\nNon-alpha trees ${pair("nonalpha_spectral_trees")}\nCombined trees ${pair("role_spectral_trees")}`, 8.12, 5.18, 4.43, 1.03, {
+    fill: C.dartmouthLight, line: C.dartmouth, color: C.ink,
+    fontSize: 10.5, bold: true, align: "center",
   });
-  addStat(slide, f(modern.model_weighted_mae, 3), "MAE", 8.8, 1.86, 1.28, C.booking);
-  addStat(slide, f(modern.spearman, 3), "Spearman", 10.37, 1.86, 1.45, C.dartmouth);
-  addText(slide, `${n(modern.n_models)} models / ${n(modern.n_profile_groups)} unique spectral summaries`, 8.8, 3.04, 3.45, 0.28, {
-    fontSize: 9.3,
-    color: C.muted,
-  });
-  addText(slide, "Legacy", 8.8, 3.62, 1.7, 0.3, {
-    fontSize: 15,
-    bold: true,
-    color: C.dartmouth,
-  });
-  addStat(slide, f(legacy.model_weighted_mae, 3), "MAE", 8.8, 4.09, 1.28, C.booking);
-  addStat(slide, f(legacy.spearman, 3), "Spearman", 10.37, 4.09, 1.45, C.dartmouth);
-  addText(slide, `${n(legacy.n_models)} models / ${n(legacy.n_profile_groups)} unique spectral summaries`, 8.8, 5.27, 3.45, 0.28, {
-    fontSize: 9.3,
-    color: C.muted,
+  addText(slide, `Shape ${pair("matrix_shape_trees")} · rank ${pair("rank_knn3")}\n${n(reviewPerf("modern", "rank_knn3").n_models)} modern / ${n(reviewPerf("legacy", "rank_knn3").n_models)} legacy rows; same near-group splits.`, 0.68, 5.96, 7.0, 0.5, {
+    fontSize: 10, color: C.muted, align: "center",
   });
   addBox(
     slide,
-    "These results cover models with similar weight summaries in training. The next test removes complete weight groups.",
-    8.8,
-    5.83,
-    3.42,
-    0.67,
+    "Alpha-specific gain is not established. Combined = alpha plus other matrix measurements; individual-task checks do not replace the controls.",
+    0.68,
+    6.57,
+    11.92,
+    0.42,
     {
       fill: C.goldLight,
       line: C.gold,
       color: C.ink,
       bold: true,
       align: "center",
-      fontSize: 10.1,
+      fontSize: 10,
+      margin: 0.06,
     }
   );
 }
@@ -1250,38 +1283,42 @@ function baseSlide(kicker, title, accent, page, source) {
 {
   const slide = baseSlide(
     "NEW-REGION STRESS TEST",
-    "Holding out a model's entire weight group reveals the limit",
+    "Unseen groups and collections expose larger errors",
     C.risk,
     15,
-    `Sources: ${DATA.run_id}/performance_cluster_holdout_metrics.csv and performance_cluster_holdout_predictions.csv`
+    `Sources: ${REVIEW.run_id}/performance_metrics.csv; audit prediction_metrics_audit.csv and collection_direction_metrics.csv`
   );
-  addImage(slide, "performance_stress.png", 0.44, 1.2, 7.2, 5.72);
-  addImage(slide, "modern_prediction_scatter.png", 7.75, 1.2, 5.05, 3.15);
-  const modern = perf("cluster_holdout", "modern");
-  const legacy = perf("cluster_holdout", "legacy");
+  addImage(slide, "review_stress.png", 0.44, 1.2, 7.64, 5.72);
+  const modern = reviewPerf("modern", "nonalpha_spectral_ridge", "whole_weight_cluster");
+  const legacy = reviewPerf("legacy", "nonalpha_spectral_ridge", "whole_weight_cluster");
+  addText(slide, "NON-ALPHA RIDGE · WHOLE-GROUP MAE", 8.35, 1.42, 4.07, 0.44, {
+    fontSize: 10.8, bold: true, color: C.booking,
+  });
+  addStat(slide, f(modern.mae), "modern", 8.35, 2.04, 1.83, C.booking);
+  addStat(slide, f(legacy.mae), "legacy", 10.57, 2.04, 1.83, C.dartmouth);
   addBox(
     slide,
-    `MODERN TASKS\nMAE ${f(modern.model_weighted_mae, 3)} · Spearman ${f(modern.spearman, 3)}\ntraining average ${f(perf("cluster_holdout", "modern", "baseline").model_weighted_mae, 3)}`,
-    8.05,
-    4.54,
-    2.05,
-    1.18,
+    "Whole weight clusters are held out together. This is a shift test, not the near-group interpolation test; compare each method with the training median.",
+    8.35,
+    3.42,
+    4.05,
+    0.97,
     {
       fill: C.bookingLight,
       line: C.booking,
       color: C.ink,
-      fontSize: 10.4,
+      fontSize: 10.5,
       bold: true,
       align: "center",
     }
   );
   addBox(
     slide,
-    `LEGACY TASKS\nMAE ${f(legacy.model_weighted_mae, 3)} · Spearman ${f(legacy.spearman, 3)}\ntraining average ${f(perf("cluster_holdout", "legacy", "baseline").model_weighted_mae, 3)}`,
-    10.34,
-    4.54,
-    2.05,
-    1.18,
+    `COLLECTION-HOLDOUT WARNING\nCombined ridge produces ${n(reviewRow("range_checks", {population: "matched_role_population", generation: "modern", split: "collection_holdout", method: "role_spectral_ridge"}).n_prediction_outside_0_100)} modern predictions outside 0-100. These are range failures, not plausible benchmark forecasts.`,
+    8.35,
+    4.76,
+    4.05,
+    1.08,
     {
       fill: C.riskLight,
       line: C.risk,
@@ -1293,11 +1330,11 @@ function baseSlide(kicker, title, accent, page, source) {
   );
   addText(
     slide,
-    "For legacy tasks, this is worse than using the training-set average. Similarity must be checked before trusting a score estimate.",
-    8.02,
-    6.05,
-    4.4,
-    0.6,
+    "Errors change across held-out groups and collections. Inspect the score range and coverage, not only average error.",
+    8.35,
+    6.19,
+    4.05,
+    0.56,
     { fontSize: 10.2, color: C.risk, bold: true, align: "center" }
   );
 }
@@ -1306,21 +1343,21 @@ function baseSlide(kicker, title, accent, page, source) {
 {
   const slide = baseSlide(
     "CONCLUSION",
-    "What the results show, and where uncertainty remains",
+    "Keep rank grouping, test Trace bases, and retain non-alpha controls",
     C.berkeley,
     16,
-    "Summary of the frozen lineage and performance evaluations in the completed run."
+    `Sources: ${REVIEW.run_id}/protocol.json, audit tables, and frozen lineage evaluation`
   );
   const columns = [
     {
       x: 0.62,
-      title: "Observed",
+      title: "Retain",
       color: C.dartmouth,
       fill: C.dartmouthLight,
       items: [
-        "17 repeatable weight-derived groups",
-        "Known base appears in top 3 for 98.4%",
-        `Modern-score error is ${f(perf("interpolation", "modern").model_weighted_mae, 3)} in the ordinary test`,
+        "Keep layer-wise grouping: all-matrix summaries cover more models but separate families poorly",
+        "Trace as a base-retrieval comparison, with fixed gallery and tie diagnostics",
+        `Non-alpha trees as baseline: MAE ${f(reviewPerf("modern", "nonalpha_spectral_trees").mae)} modern / ${f(reviewPerf("legacy", "nonalpha_spectral_trees").mae)} legacy`,
       ],
     },
     {
@@ -1329,9 +1366,9 @@ function baseSlide(kicker, title, accent, page, source) {
       color: C.booking,
       fill: C.bookingLight,
       items: [
-        "Alpha order through depth contains family information",
-        "Broad families are easier than exact checkpoint ancestry",
-        "Score estimates depend on nearby training examples",
+        "Ranks discard magnitude; direct measurements predict scores better",
+        "Adding alpha did not improve the key spectral controls",
+        "Local prediction and broad grouping are distinct from historical ancestry",
       ],
     },
     {
@@ -1340,9 +1377,9 @@ function baseSlide(kicker, title, accent, page, source) {
       color: "9A6A00",
       fill: C.goldLight,
       items: [
-        "Similarity cannot establish parent or training direction",
-        "A base absent from the candidate list cannot be returned",
-        "Legacy errors exceed the mean baseline when a whole group is unseen",
+        "Repository-ID source joins do not verify the analyzed checkpoint revision",
+        "Missing bases and near-tied candidates limit exact-ID retrieval",
+        "Whole-group shifts worsen errors; collection-shift ridge can leave 0-100",
       ],
     },
   ];
@@ -1366,7 +1403,7 @@ function baseSlide(kicker, title, accent, page, source) {
   });
   addBox(
     slide,
-    "Overall: weight-derived alpha summaries support broad grouping, known-base matching, and local score estimation. Exact ancestry needs an additional direct weight-matrix check.",
+    "Exploratory evidence, not an untouched replication. Before deployment: verify checkpoint revisions, test external roots, and calibrate rejection on separate data.",
     0.62,
     6.24,
     11.72,
@@ -1414,7 +1451,7 @@ function baseSlide(kicker, title, accent, page, source) {
     fontSize: 10,
     bold: true,
     color: C.gold,
-    charSpacing: 1.5,
+    charSpacing: 0,
   });
   addText(slide, "Methods and definitions", 0.72, 1.27, 8.7, 0.78, {
     fontFace: DISPLAY,
@@ -1578,7 +1615,7 @@ function baseSlide(kicker, title, accent, page, source) {
 {
   const slide = baseSlide(
     "APPENDIX A2 · MODEL ANALYSIS",
-    "Each weight matrix becomes a fitted spectrum and a structured record",
+    "From weight matrices to saved spectral measurements",
     C.dartmouth,
     19,
     "Sources: Model-Zoo/esd_experiment/src/worker.py and Model-Zoo/README.md"
@@ -1692,11 +1729,11 @@ function baseSlide(kicker, title, accent, page, source) {
     "Add direct weight-matrix comparisons for within-family verification",
     C.dartmouth,
     20,
-    "Primary sources: arXiv:2608.07786, arXiv:2608.14929, arXiv:2510.06738."
+    "Primary sources: https://arxiv.org/html/2608.07786v1; https://arxiv.org/html/2608.14929v1; https://arxiv.org/html/2510.06738v3"
   );
   addBox(
     slide,
-    `STAGE 1\nHTSR coarse retrieval\n${n(counts.lineage_models)} assigned models`,
+    `STAGE 1\nrank grouping + Trace retrieval\n${n(counts.lineage_models)} rank assignments`,
     0.72,
     1.42,
     3.1,
@@ -1730,7 +1767,7 @@ function baseSlide(kicker, title, accent, page, source) {
   addArrow(slide, 8.42, 2.08, 1.0, C.muted);
   addBox(
     slide,
-    "OUTPUT\nrelated / unrelated evidence\nwith calibrated thresholds",
+    "OUTPUT\nrelatedness evidence\ncalibrate on separate pairs",
     9.58,
     1.42,
     3.1,
@@ -1749,21 +1786,21 @@ function baseSlide(kicker, title, accent, page, source) {
       x: 0.72,
       id: "arXiv:2608.07786",
       title: "Spectral energy + subspace alignment",
-      note: "Coarse family separation plus fine directional geometry.",
+      note: "Trace tested from sqrt(norm). Fine directional comparison requires top singular vectors, not scalar summaries.",
       color: C.booking,
     },
     {
       x: 4.48,
       id: "arXiv:2608.14929",
       title: "Centered residual signatures",
-      note: "Removes shared identity structure before comparing residual blocks.",
+      note: "Center Wout Win by subtracting trace(M) I/d. Requires compatible blocks; symmetric similarity is not ancestry direction.",
       color: C.dartmouth,
     },
     {
       x: 8.24,
       id: "AWM · arXiv:2510.06738",
       title: "Assignment + centered alignment",
-      note: "Aligns matrices, then compares their centered weight structure.",
+      note: "Embedding assignment and sign alignment, then Q/K unbiased CKA. Requires direct weights; not tested in this audit.",
       color: "9A6A00",
     },
   ];
@@ -1781,15 +1818,15 @@ function baseSlide(kicker, title, accent, page, source) {
       align: "center",
       fontSize: 11,
     });
-    addText(slide, paper.note, paper.x, 4.69, 3.38, 0.68, {
-      fontSize: 10,
+    addText(slide, paper.note, paper.x, 4.69, 3.38, 0.9, {
+      fontSize: 9.6,
       color: C.body,
       align: "center",
     });
   });
   addBox(
     slide,
-    "Not tested here: the saved cache has scalar eigenvalue summaries, not singular vectors or centered weight matrices.",
+    "Trace is feasible from saved scalar norms and was tested. Directional, residual, and AWM checks still require unavailable direct-weight information; none alone proves historical ancestry.",
     0.72,
     5.86,
     11.9,
@@ -1820,8 +1857,8 @@ function baseSlide(kicker, title, accent, page, source) {
     ["ARI", "Adjusted Rand Index: grouping agreement corrected for chance; 1 is exact."],
     ["Spearman", "Agreement in rank order; 1 means the two rankings match."],
     ["MAE", "Mean absolute error: the average size of a score prediction error."],
-    ["Five-part test", "Divide models into five fixed parts; test each part using the other four."],
-    ["Known-base test", "Choose the closest model from a fixed list of possible base checkpoints."],
+    ["Near-group test", "Keep near-profile groups intact in five fixed parts; fit scores using the other four."],
+    ["Trace", "Mean role-wise Pearson of Frobenius depth profiles; resample to pair-max depth."],
     ["Representative", "The observed core model closest to its group mean; not necessarily its historical base."],
   ];
   terms.forEach(([term, definition], index) => {
@@ -1842,7 +1879,7 @@ function baseSlide(kicker, title, accent, page, source) {
   });
   addBox(
     slide,
-    "Evidence boundary: model weights and benchmark training scores create predictions. Provenance and family metadata are opened only after predictions are saved, to measure correctness.",
+    "Evidence boundary: saved weight features plus training scores form predictions. Declared source links evaluate frozen retrieval; collection metadata shaped selection and one holdout. Checkpoint revision remains unverified.",
     0.68,
     6.26,
     11.98,

@@ -8,11 +8,27 @@ from fetch_data.phase2_schema import (
     classify_loader_scenario_from_row,
     classify_primary_type,
     collapse_leaderboard_duplicates,
+    first_architecture,
     load_atlas_candidates,
     normalize_repo_id,
     parse_repo_and_revision,
     seed_analysis_status,
 )
+
+
+def test_architecture_accepts_a_name_or_a_list_without_truncation():
+    assert first_architecture("LlamaForCausalLM") == "LlamaForCausalLM"
+    assert first_architecture(["LlamaForCausalLM"]) == "LlamaForCausalLM"
+    assert first_architecture([]) is None
+
+
+def test_text_conditional_generation_is_not_evidence_of_multimodality():
+    text = pd.Series({"Architecture": "T5ForConditionalGeneration", "pipeline_tag": "text2text-generation"})
+    assert classify_primary_type(text) == "other_text"
+    assert classify_loader_scenario_from_row(text) == "standard_transformers"
+    vision = pd.Series({"Architecture": "LlavaForConditionalGeneration", "pipeline_tag": "image-text-to-text"})
+    assert classify_primary_type(vision) == "multimodal"
+    assert classify_loader_scenario_from_row(vision) == "multimodal_transformers"
 
 
 def test_parse_repo_and_revision_splits_explicit_revision():
