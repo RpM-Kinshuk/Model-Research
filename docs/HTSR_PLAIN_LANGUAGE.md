@@ -1,5 +1,9 @@
 # Current conclusion in plain language
 
+These are the completed September 2026 findings. The
+[October 23 plan](research/scaleup/model_zoo_frontier_research_plan_2026-10-23.md)
+proposes the next model-selection experiments; it does not add prediction results.
+
 We rechecked the reference paper, collection code, saved matrix measurements,
 data joins, predictions, and reporting. We also tested alternatives on the same
 models. The source data was not changed.
@@ -10,6 +14,10 @@ models. The source data was not changed.
 gives 17 repeatable groups across 10,946 models. Agreement with 2,981 broad-family
 labels is 0.924 by adjusted Rand index, where 1 means identical grouping. The
 174 human-reviewed models are one validation subset, not the whole analysis.
+Grouping covers 87.2% of the 12,553 models with saved analyses, or 55.5% of the
+19,713 selected records. Missing analyses account for much of that difference.
+The method handles different layer counts and tested missing-role patterns;
+accuracy across unfamiliar architectures remains untested.
 
 **Known-base matching depends on the comparison.** Comparing layer-wise
 matrix norms raises first-choice accuracy from 82.30% to 85.19% on the same 3,802
@@ -57,8 +65,12 @@ Keep the existing family groups, add the norm-based base comparison, and use
 non-alpha spectral measurements as the stronger simple performance baseline.
 Do not claim we beat the paper: the populations and evaluations differ.
 
-The next priority is collecting revision-pinned weights and matching benchmark
-records, plus the missing candidate bases and eigenvalues needed for the paper's
-alpha estimator. More tuning on the same uncertain records is less decisive.
+The newer collector now records pinned revisions, matrix coverage, and full
+computed spectra. Its new records have not yet been used in the prediction
+results above. The next experiment should join scores to those exact checkpoints
+and test whether the measurements improve model choices for particular tasks.
+The plan retains the weight-only comparison and proposes a hybrid using
+documentation and historical evaluations. The missing candidate bases and a
+matched test of the paper's alpha estimator remain useful follow-ups.
 
 See [the study](HTSR_STUDY.md) for the process, comparisons, and limitations.

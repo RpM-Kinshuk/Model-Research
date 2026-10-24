@@ -139,7 +139,7 @@ def row(
     return selected.iloc[0].to_dict()
 
 
-def corpus_coverage(metadata: dict, ledger: pd.DataFrame) -> dict[str, int]:
+def corpus_coverage(metadata: dict, ledger: pd.DataFrame) -> dict[str, object]:
     lineage_flag = ledger.get(
         "lineage_profile_available", ledger["htsr_profile_available"]
     ).astype(bool)
@@ -168,48 +168,47 @@ def corpus_coverage(metadata: dict, ledger: pd.DataFrame) -> dict[str, int]:
     phase2_analyzed = int(provenance["counts"]["development_stats_artifacts"])
     ablation_analyzed = int(provenance["counts"]["external_stats_artifacts"])
 
-    funnels = [
-        (
-            "Phase 2",
-            [phase2_listed, phase2_analyzed, phase2_performance, phase2_lineage, phase2_strict],
-            BERKELEY,
-        ),
-        (
-            "Ablation",
-            [ablation_listed, ablation_analyzed, ablation_performance, ablation_lineage, ablation_strict],
-            DARTMOUTH,
-        ),
-    ]
-    labels = ["Listed", "Analyzed", "Performance set", "Lineage set", "Strict core"]
-    fig, axes = plt.subplots(1, 2, figsize=(10.8, 4.2))
-    for ax, (title, values, accent) in zip(axes, funnels):
-        bars = ax.barh(
-            labels[::-1],
-            values[::-1],
-            color=[accent, DARTMOUTH, GOLD, BOOKING, GRID],
-            height=0.58,
-        )
-        for bar, value in zip(bars, values[::-1]):
-            ax.text(
-                value + max(values) * 0.025,
-                bar.get_y() + bar.get_height() / 2,
-                f"{value:,}",
-                va="center",
-                color=INK,
-                weight="bold",
-            )
-        ax.set_xlim(0, max(values) * 1.22)
-        ax.set_title(title, loc="left", fontsize=14, pad=11)
-        ax.set_xlabel("models")
-        clean_axis(ax, grid="x")
-    fig.suptitle(
-        "Strict paper comparison and broader operational coverage",
-        x=0.01,
-        y=1.03,
-        ha="left",
-        fontsize=10,
-        color=MUTED,
-    )
+    rows = []
+    for name, listed, analyzed, grouped, strict in (
+        ("Phase 2", phase2_listed, phase2_analyzed, phase2_lineage, phase2_strict),
+        ("Ablation", ablation_listed, ablation_analyzed, ablation_lineage, ablation_strict),
+        ("Combined", phase2_listed + ablation_listed, phase2_analyzed + ablation_analyzed,
+         phase2_lineage + ablation_lineage, phase2_strict + ablation_strict),
+    ):
+        if not 0 <= strict <= grouped <= analyzed <= listed:
+            raise ValueError(f"Inconsistent grouping coverage for {name}")
+        rows.append({"collection": name, "selected": listed, "analyzed": analyzed,
+            "grouped": grouped, "complete_roles": strict, "accepted_partial": grouped - strict,
+            "analyzed_unassigned": analyzed - grouped, "no_analysis": listed - analyzed,
+            "share_analyzed": grouped / analyzed if analyzed else 0.0,
+            "share_selected": grouped / listed if listed else 0.0})
+    fig, ax = plt.subplots(figsize=(10.8, 5.4))
+    y = np.arange(len(rows))[::-1]
+    left = np.zeros(len(rows))
+    for column, label, color in (
+        ("complete_roles", "Complete seven roles", BOOKING),
+        ("accepted_partial", "Accepted partial roles", DARTMOUTH),
+        ("analyzed_unassigned", "Analyzed, unassigned", "#B8C6D6"),
+        ("no_analysis", "No completed analysis", "#EDF1F5"),
+    ):
+        widths = np.asarray([100 * r[column] / max(r["selected"], 1) for r in rows])
+        ax.barh(y, widths, left=left, color=color, height=0.58, label=label)
+        left += widths
+    for pos, item in zip(y, rows):
+        ax.text(item["share_selected"] * 50, pos,
+            f"{item['grouped']:,} grouped\n{item['share_selected']:.1%} of selected",
+            ha="center", va="center", color="white", fontsize=11, weight="bold")
+        if item["no_analysis"] / max(item["selected"], 1) >= 0.14:
+            x = 100 * (1 - item["no_analysis"] / item["selected"] / 2)
+            ax.text(x, pos, f"{item['no_analysis']:,}\nno analysis", ha="center", va="center", color=MUTED, fontsize=10)
+    ax.set_yticks(y, [f"{r['collection']}\n{r['selected']:,} selected" for r in rows])
+    ax.set_xlim(0, 100)
+    ax.set_xlabel("Share of selected records")
+    ax.xaxis.set_major_formatter(lambda value, _: f"{value:.0f}%")
+    ax.set_title("Layer-wise grouping: assigned, unassigned, and unmeasured", loc="left", fontsize=13, pad=16)
+    ax.legend(frameon=False, ncols=2, loc="upper center", bbox_to_anchor=(0.5, -0.2), fontsize=10)
+    clean_axis(ax, grid="x")
+    fig.subplots_adjust(left=0.16, bottom=0.24, top=0.9, right=0.99)
     finish(fig, "corpus_coverage.png")
     return {
         "phase2_listed": phase2_listed,
@@ -222,6 +221,7 @@ def corpus_coverage(metadata: dict, ledger: pd.DataFrame) -> dict[str, int]:
         "ablation_profiles": ablation_lineage,
         "ablation_performance": ablation_performance,
         "ablation_strict": ablation_strict,
+        "grouping_coverage": rows,
     }
 
 
@@ -948,6 +948,9 @@ def main() -> None:
             )
             pd.DataFrame(collections).T.to_excel(
                 writer, sheet_name="collection_summary"
+            )
+            pd.DataFrame(profile_sources["grouping_coverage"]).to_excel(
+                writer, sheet_name="grouping_coverage", index=False
             )
             for name, table in reassessment_tables.items():
                 table.to_excel(writer, sheet_name=("review_"+name)[:31], index=False)

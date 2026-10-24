@@ -49,6 +49,10 @@ pptx.theme = { headFontFace: DISPLAY, bodyFontFace: FONT, lang: "en-US" };
 
 const counts = DATA.counts;
 const coverage = DATA.profile_sources;
+const groupingCoverage = coverage.grouping_coverage?.find((row) => row.collection === "Combined");
+if (!groupingCoverage) {
+  throw new Error("Grouping coverage is missing; regenerate chart_data.json with make_charts.py");
+}
 const collections = DATA.collections;
 const internal = DATA.internal;
 const REVIEW = DATA.reassessment;
@@ -118,7 +122,6 @@ function reviewAuc(method, signal) {
 
 const rankGallery = reviewGallery("parent_rank32_dks");
 const traceGallery = reviewGallery("trace_sqrt_norm_pearson");
-const allMatrixManual = reviewRow("all_matrix_clusters", { label_source: "manual_confirmed" });
 
 function addText(slide, text, x, y, w, h, options = {}) {
   slide.addText(text, {
@@ -391,6 +394,10 @@ function baseSlide(kicker, title, accent, page, source) {
     true
   );
   addCoverArtwork(slide);
+  addText(slide, "September 2026 results / October 2026 scale-up plan", 0.75, 6.48, 7.4, 0.24, {
+    fontSize: 10,
+    color: "D9E2EC",
+  });
   addText(slide, `Exploratory reassessment: ${REVIEW.run_id}`, 0.75, 6.93, 7.4, 0.18, {
     fontSize: 7.8,
     color: "B9C5D6",
@@ -926,30 +933,24 @@ function baseSlide(kicker, title, accent, page, source) {
 {
   const slide = baseSlide(
     "DATA",
-    "Role coverage and all-matrix coverage answer different questions",
+    "How much of the collection can layer-wise grouping cover?",
     C.booking,
     8,
-    `Sources: parent population_ledger.csv; ${REVIEW.run_id}/metadata.json and all_matrix_cluster_validation.csv`
+    `Sources: ${DATA.run_id}/population_ledger.csv; retained combined-study provenance.json`
   );
-  addImage(slide, "corpus_coverage.png", 0.52, 1.24, 8.05, 5.55);
-  addStat(slide, n(counts.strict_seven_role_models), "strict seven-role core", 8.92, 1.37, 2.9, C.berkeley);
-  addStat(slide, n(counts.lineage_models), "lineage assignments", 8.92, 2.62, 2.9, C.booking);
-  addStat(
-    slide,
-    n(REVIEW.counts.all_matrix_alpha_models),
-    "all-matrix alpha eligible",
-    8.92,
-    3.87,
-    2.7,
-    C.dartmouth
-  );
+  addImage(slide, "corpus_coverage.png", 0.42, 1.38, 8.02, 5.38);
+  addStat(slide, n(groupingCoverage.grouped), "grouped models", 8.85, 1.42, 3.0, C.booking);
+  addStat(slide, pct(groupingCoverage.share_analyzed), "of analyzed models", 8.85, 2.68, 3.0, C.dartmouth,
+    `${n(groupingCoverage.grouped)} / ${n(groupingCoverage.analyzed)}`);
+  addStat(slide, pct(groupingCoverage.share_selected), "of selected records", 8.85, 3.99, 3.0, C.berkeley,
+    `${n(groupingCoverage.grouped)} / ${n(groupingCoverage.selected)}`);
   addBox(
     slide,
-    `Broader eligibility does not imply better grouping. All-matrix family ARI ${f(allMatrixManual.adjusted_rand)} vs rank ${f(manual.adjusted_rand)} on human-reviewed labels; populations differ.`,
+    `Fixed seven-role vocabulary; only tested missing-role patterns are admitted. ${n(groupingCoverage.no_analysis)} selected records have no completed analysis. Unseen-architecture accuracy remains untested.`,
     8.82,
-    5.28,
-    3.45,
-    1.03,
+    5.46,
+    3.55,
+    1.15,
     {
       fill: C.surface,
       line: C.line,
@@ -1403,7 +1404,7 @@ function baseSlide(kicker, title, accent, page, source) {
   });
   addBox(
     slide,
-    "Exploratory evidence, not an untouched replication. Before deployment: verify checkpoint revisions, test external roots, and calibrate rejection on separate data.",
+    "Next experiment: use the newer pinned collection to test whether weight measurements improve task-specific model choices. See the October scale-up plan in the appendix.",
     0.62,
     6.24,
     11.72,
@@ -1453,7 +1454,7 @@ function baseSlide(kicker, title, accent, page, source) {
     color: C.gold,
     charSpacing: 0,
   });
-  addText(slide, "Methods and definitions", 0.72, 1.27, 8.7, 0.78, {
+  addText(slide, "Methods and next study", 0.72, 1.27, 8.7, 0.78, {
     fontFace: DISPLAY,
     fontSize: 38,
     bold: true,
@@ -1474,6 +1475,7 @@ function baseSlide(kicker, title, accent, page, source) {
     ["A2", "Matrix analysis and storage", C.gold],
     ["A3", "Future direct weight comparison", "65C18C"],
     ["A4", "Terms and evidence guide", C.white],
+    ["A5", "October scale-up research plan", C.gold],
   ];
   items.forEach(([id, label, color], index) => {
     const y = 3.35 + index * 0.72;
@@ -1506,7 +1508,7 @@ function baseSlide(kicker, title, accent, page, source) {
     "One scheduler assigns jobs to available graphics processors",
     C.booking,
     18,
-    "Sources: Model-Zoo/esd_experiment/gputracker and Model-Zoo/docs/operations/analysis.md"
+    "Historical collection workflow; newer operational collector: /jumbo/yaoqingyang/kinshuk/Model-Zoo/docs/operations/analysis.md"
   );
 
   addBox(slide, "Curated model list", 0.58, 1.34, 2.1, 0.7, {
@@ -1618,7 +1620,7 @@ function baseSlide(kicker, title, accent, page, source) {
     "From weight matrices to saved spectral measurements",
     C.dartmouth,
     19,
-    "Sources: Model-Zoo/esd_experiment/src/worker.py and Model-Zoo/README.md"
+    "Sources: historical model statistics; current collector: /jumbo/yaoqingyang/kinshuk/Model-Zoo/docs/operations/analysis.md"
   );
   const pipeline = [
     ["W", "weight matrix", C.booking],
@@ -1674,7 +1676,7 @@ function baseSlide(kicker, title, accent, page, source) {
   });
   const outputs = [
     ["CSV / HDF5", "per-layer metrics and model fields"],
-    ["Optional eigenvalues", "larger files; useful for later re-fitting"],
+    ["Full spectra", "current collector: saved by default; opt-out available"],
     ["Logs and status", "progress, failures, retries, and timing"],
   ];
   outputs.forEach(([title, note], index) => {
@@ -1706,7 +1708,7 @@ function baseSlide(kicker, title, accent, page, source) {
   );
   addBox(
     slide,
-    "Analysis continues past inaccessible or repeatedly failing models after the configured retry limit. Completed records remain available for aggregation.",
+    "New collector: pinned revisions and matrix coverage. Historical results here still use stored DKS alpha; the new default uses the fixed-tail rule.",
     7.02,
     5.38,
     5.64,
@@ -1893,6 +1895,56 @@ function baseSlide(kicker, title, accent, page, source) {
       align: "center",
     }
   );
+}
+
+// 22. Proposed scale-up study
+{
+  const slide = baseSlide(
+    "APPENDIX A5 · OCTOBER RESEARCH PLAN",
+    "Do weight measurements improve model selection for a task?",
+    C.dartmouth,
+    22,
+    "Source: docs/research/scaleup/model_zoo_frontier_research_plan_2026-10-23.md; proposed experiments and milestones."
+  );
+  addText(slide, "Measure score lost versus the best feasible model, evaluation cost, and constraint failures.",
+    0.68, 1.25, 11.98, 0.32, {fontSize: 12, color: C.body});
+  const steps = [
+    ["Task + constraints", "examples, memory, latency", C.booking, C.bookingLight],
+    ["Retrieve candidates", "use model groups and evidence", C.dartmouth, C.dartmouthLight],
+    ["Estimate suitability", "predict scores for the task", C.booking, C.bookingLight],
+    ["Evaluate finalists", "spend the remaining budget", "9A6A00", C.goldLight],
+  ];
+  steps.forEach(([title, detail, color, fill], index) => {
+    const x = 0.68 + index * 3.16;
+    addBox(slide, title, x, 1.94, 2.45, 0.66, {fill, line: color, color: C.ink,
+      fontSize: 12.5, bold: true, align: "center"});
+    addText(slide, detail, x, 2.77, 2.45, 0.46, {fontSize: 10.5, color: C.body, align: "center"});
+    if (index < steps.length - 1) addArrow(slide, x + 2.58, 2.27, 0.43, color);
+  });
+  addText(slide, "COLLECTOR CAPABILITIES NOW", 0.68, 3.44, 5.7, 0.24,
+    {fontSize: 10, bold: true, color: C.booking});
+  addRule(slide, 0.68, 3.82, 5.7, C.booking, 1.6);
+  addText(slide, "Pinned revisions, canonical matrix records, full computed spectra, and explicit coverage.\nNew records still need verified benchmark joins and prediction experiments.",
+    0.68, 4.02, 5.7, 0.82, {fontSize: 11.5, color: C.body});
+  addText(slide, "PROPOSED EVIDENCE COMPARISON", 7.02, 3.44, 5.63, 0.24,
+    {fontSize: 10, bold: true, color: C.dartmouth});
+  addRule(slide, 7.02, 3.82, 5.63, C.dartmouth, 1.6);
+  addText(slide, "Scientific track: weights plus training scores.\nPractical track: documentation, historical scores, and weights.\nTest new roots, tasks, and future releases.",
+    7.02, 4.02, 5.63, 0.82, {fontSize: 11.5, color: C.body});
+  addText(slide, "PROPOSED COLLECTION MILESTONES", 0.68, 5.16, 11.98, 0.24,
+    {fontSize: 10, bold: true, color: C.muted});
+  addRule(slide, 0.86, 5.66, 11.57, C.line, 2);
+  const milestones = [
+    ["1k pinned artifacts", "Measure collection cost and coverage", C.booking],
+    ["5k-10k measured", "Compare task choices and evidence", C.dartmouth],
+    ["50k measured target", "Release the zoo and benchmark", "9A6A00"],
+  ];
+  milestones.forEach(([title, detail, color], index) => {
+    const x = 0.68 + index * 4.17;
+    addDot(slide, x + 0.18, 5.66, 0.12, color);
+    addText(slide, title, x, 5.96, 3.64, 0.34, {fontSize: 16, bold: true, color});
+    addText(slide, detail, x, 6.44, 3.64, 0.38, {fontSize: 10.5, color: C.body});
+  });
 }
 
 for (const slide of pptx._slides) {

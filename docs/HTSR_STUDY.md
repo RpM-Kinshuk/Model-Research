@@ -2,6 +2,14 @@
 
 ## Status
 
+Documentation updated October 24, 2026. The results below are the completed
+September 2026 experiments; the
+[October 23 scale-up plan](research/scaleup/model_zoo_frontier_research_plan_2026-10-23.md)
+describes the next research phase. It proposes task-specific model selection
+under deployment constraints and an evaluation budget. Its hybrid comparison
+would add documentation and historical evaluations alongside the existing
+weight-only scientific track.
+
 This is an exploratory reassessment of saved weight analyses, not a new test on
 previously untouched models. The earlier family-grouping run is retained:
 `research_runs/htsr_weight_only/runs/weight_only_2a5abfeb98dc33d9662c`.
@@ -34,6 +42,26 @@ are distinct from the spectral and checkpoint overlap checks on scored models.
 | Earlier accepted family-group assignments | 7,802 | 3,144 | 10,946 |
 | Earlier performance pool: at least four roles | 8,422 | 3,379 | 11,801 |
 
+### How much can layer-wise grouping cover?
+
+| Collection | Grouped / analyzed | Share of analyzed | Share of selected records |
+| --- | ---: | ---: | ---: |
+| Phase 2 | 7,802 / 8,892 | 87.7% | 52.0% |
+| Ablation | 3,144 / 3,661 | 85.9% | 66.7% |
+| Combined | 10,946 / 12,553 | 87.2% | 55.5% |
+
+The combined total includes 10,431 complete seven-role sequences and 515 accepted
+partial sequences. Of the analyzed models, 1,607 remain unassigned under the
+current representation and missing-role checks. Another 7,160 selected records
+have no completed historical analysis; they were never tested by this grouping
+method.
+
+Coverage is strongest for the transformer layouts represented by the seven
+roles. Normalized layer depth handles different layer counts, and the masking
+check admits particular missing-role patterns. The method still uses a fixed
+role vocabulary. These counts do not demonstrate comparable accuracy on unseen
+architectures or independent model families.
+
 Phase 2 combines the Model Atlas graph, sampled metadata, leaderboard records,
 and targeted Hugging Face searches. Selection tries to cover base models,
 fine-tunes, adapters, merges, quantized models, mixture-of-experts models, and
@@ -53,22 +81,30 @@ cover 2,641 modern and 3,817 legacy average-score targets. This broadens analysi
 of the **matrices actually saved**; it does not recover matrices omitted during
 collection or establish support for every architecture.
 
-### Checkpoint identity is unresolved
+### Historical checkpoint identity is unresolved
 
-Saved analyses do not record the resolved checkpoint commit. Benchmark records
+Historical analyses do not record the resolved checkpoint commit. Benchmark records
 sometimes do. Repository matching therefore does not prove that the score and
 analyzed weights refer to the same revision.
 
 In the expanded scored population, 210 models have both modern and legacy
 benchmark commits recorded; 164 have different commits. Among 79 comparable
-legacy Phase 2 records, 66
-disagree with the Phase 2 source commit. Different commits do not by themselves
+legacy Phase 2 records, 66 disagree with the Phase 2 source commit. Different
+commits do not by themselves
 prove different tensors, but the missing analysis commit prevents verification.
 All score results below must be read with this limitation.
 
 Source files are unchanged. Derived tables, predictions, and audits live in
 `research_runs/`. Future collection must record requested and effective
 repositories, resolved commits, adapter and base commits, and benchmark identity.
+
+The [newer operational collector](/jumbo/yaoqingyang/kinshuk/Model-Zoo/docs/operations/analysis.md)
+now requires pinned model and adapter-base revisions, stores canonical matrix
+identities, saves full computed spectra by default, and records analyzed/skipped
+coverage. These capabilities apply to its newer records. The historical data
+used here has not been replaced, and the benchmark experiments have not been
+rerun on that collection. Completed collection can still have partial matrix
+coverage, so a successful record alone is insufficient for a comparison.
 
 ## Allowed information
 
@@ -99,8 +135,8 @@ For each matrix `W`, squared singular values give the eigenvalues of `W^T W`.
 Heavy-tailed self-regularization (HTSR) studies their distribution, including a
 power-law tail: `p(lambda) proportional to lambda^-alpha`.
 
-The collector uses a custom DKS-style maximum-likelihood fit: try different
-tail starts and choose the smallest Kolmogorov-Smirnov distance between the
+The historical collector used a custom DKS-style maximum-likelihood fit: try
+different tail starts and choose the smallest Kolmogorov-Smirnov distance between the
 observed and fitted distributions. This is not the paper's fixed-half-tail Hill
 estimator. Saved `xmin` is the smallest retained eigenvalue, **not the fitted-tail
 start**. Saved `norm` is the sum of retained eigenvalues, approximately the
@@ -110,7 +146,8 @@ Scalar alpha cannot be converted back to Hill alpha. Sampled HDF5 files contain
 alpha only. Exact replication needs saved eigenvalues where available or another
 pass over checkpoint weights. Historical collection also skipped some narrow
 projections; accepting partial sequences cannot reconstruct those matrices.
-Full eigenvalue arrays were found for only 17 of the 12,553 analyzed models.
+In that historical corpus, full eigenvalue arrays were found for only 17 of the
+12,553 analyzed models.
 Even a complete spectrum omits the singular vectors: rotating matrix coordinates
 can preserve every singular value. Equal spectra therefore do not prove equal
 weights, shared training history, or an exact parent relationship.
@@ -338,9 +375,10 @@ score law across architectures and benchmarks.
   Keep non-alpha spectral trees as the simple leading baseline. Alpha remains
   a comparator, not an assumed source of improvement. Ridge exposes transfer
   signal but has serious out-of-range failures.
-- Treat these results as exploratory and checkpoint-unverified. Prioritize
-  revision-pinned collection, the nine missing candidate bases, and saved
-  eigenvalues for a real Hill comparison.
+- Treat these results as exploratory and checkpoint-unverified. Use the newer
+  collector for revision-pinned measurements and verified evaluation joins;
+  collect the nine missing candidate bases and use saved eigenvalues for a
+  matched Hill comparison.
 
 Methods requiring singular vectors or direct products of weight matrices cannot
 be recovered from scalar spectral statistics alone. They are follow-up options,

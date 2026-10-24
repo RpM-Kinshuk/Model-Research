@@ -1,5 +1,10 @@
 # Scripts
 
+These entrypoints reproduce the completed study and reassessment. The
+[October scale-up plan](../docs/research/scaleup/model_zoo_frontier_research_plan_2026-10-23.md)
+proposes further model-selection experiments; it is not another implemented
+analysis pipeline.
+
 ## Supported
 
 - `htsr_reassessment.py`: current fixed-method comparison of saved measurements,

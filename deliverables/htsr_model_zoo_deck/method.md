@@ -5,6 +5,11 @@ The main methodology and findings are in [HTSR_STUDY.md](../../docs/HTSR_STUDY.m
 `assets/chart_data.json` and `htsr_study_data.xlsx`. Do not copy older slide
 numbers over newer results without checking the population and test design.
 
+The October 24 update retains the September experimental results. Appendix A5
+summarizes the [October research plan](../../docs/research/scaleup/model_zoo_frontier_research_plan_2026-10-23.md).
+Its model-selection experiments, hybrid evidence comparison, and collection
+milestones are proposed work.
+
 ## Evidence boundary
 
 - Grouping uses weights only; validation labels are revealed after assignments.
@@ -14,8 +19,12 @@ numbers over newer results without checking the population and test design.
   from fitting. Descriptive metadata is not a numeric feature.
 - Metadata shapes collection and collection-transfer splits. Thus the predictor
   is metadata-isolated, but the experiment is not knowledge-free.
-- Current analyses lack a resolved weight checkpoint commit. Repository-based
+- The historical analyses lack a resolved weight checkpoint commit. Repository-based
   score joins are not checkpoint-verified. All results remain exploratory.
+- Grouping coverage uses two denominators: 10,946 / 12,553 analyzed models (87.2%)
+  and 10,946 / 19,713 selected records (55.5%). The 7,160 missing analyses are
+  separate from 1,607 analyzed models left unassigned. Coverage alone does not
+  establish accuracy on unseen architectures.
 
 ## What each comparison supports
 
@@ -51,11 +60,17 @@ allocation settings, drain pending work, or stop workers. Retry rules separate
 retryable failures from access and unsupported-model failures. Per-task model
 caches are removed on exit, trading more downloads for bounded disk usage.
 
-The collector supports decomposition choices, tail-fitting rules, and optional
-eigenvalue output. Current saved alpha uses a custom DKS-style fit, not fixed-tail
+The collector supports decomposition choices and tail-fitting rules. The newer
+operational collector requires pinned revisions, records canonical matrix
+identities and coverage, and saves full computed spectra by default with an
+opt-out. These records have not been used in the reported prediction experiments.
+Historical saved alpha uses a custom DKS-style fit, not fixed-tail
 Hill. Saved `xmin` is the smallest retained eigenvalue, not the fitted cutoff.
 The Trace comparison uses the square root of the saved eigenvalue sum, which can
 omit eigenvalues filtered during collection.
+
+The old aspect-ratio skip is disabled by default in the current collector.
+Omissions recorded by the older cost pilot remain part of that pilot's coverage.
 
 ## Design and verification
 

@@ -26,7 +26,45 @@
     "ablation_analyzed": 3661,
     "ablation_profiles": 3144,
     "ablation_performance": 3379,
-    "ablation_strict": 2841
+    "ablation_strict": 2841,
+    "grouping_coverage": [
+      {
+        "collection": "Phase 2",
+        "selected": 15000,
+        "analyzed": 8892,
+        "grouped": 7802,
+        "complete_roles": 7590,
+        "accepted_partial": 212,
+        "analyzed_unassigned": 1090,
+        "no_analysis": 6108,
+        "share_analyzed": 0.8774179037336932,
+        "share_selected": 0.5201333333333333
+      },
+      {
+        "collection": "Ablation",
+        "selected": 4713,
+        "analyzed": 3661,
+        "grouped": 3144,
+        "complete_roles": 2841,
+        "accepted_partial": 303,
+        "analyzed_unassigned": 517,
+        "no_analysis": 1052,
+        "share_analyzed": 0.8587817536192297,
+        "share_selected": 0.6670910248249523
+      },
+      {
+        "collection": "Combined",
+        "selected": 19713,
+        "analyzed": 12553,
+        "grouped": 10946,
+        "complete_roles": 10431,
+        "accepted_partial": 515,
+        "analyzed_unassigned": 1607,
+        "no_analysis": 7160,
+        "share_analyzed": 0.8719827929578586,
+        "share_selected": 0.5552680971947446
+      }
+    ]
   },
   "method_boundary": {
     "excluded_before_prediction_freeze": [

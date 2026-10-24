@@ -168,7 +168,7 @@ Use a mixture of:
 
 Record why each model entered the collection. This allows us to distinguish evidence about popular deployable models from evidence about the wider ecosystem.
 
-Two existing limits deserve attention before a heterogeneous release. The default 6 GiB weight budget excludes many relevant larger models. Also, the saved Qwen2.5-3B cost pilot omitted 72 tensors because of the aspect-ratio rule. These policies materially shape coverage and should be revised or explicitly reflected in release scope. The [pilot report](/jumbo/yaoqingyang/kinshuk/Model-Zoo/analysis_runs/validation/cost_pilot_20260929/pilot_report.json) makes that visible.
+Collection policies deserve attention before a heterogeneous release. The default 6 GiB weight budget excludes many relevant larger models. The saved Qwen2.5-3B cost pilot omitted 72 tensors because of the historical aspect-ratio rule. The current collector disables that skip by default, as verified October 24; the older pilot still has partial coverage. Record each run's selection policy and check its coverage rather than treating those omissions as a current default or assuming they were recovered. See the [pilot report](/jumbo/yaoqingyang/kinshuk/Model-Zoo/analysis_runs/validation/cost_pilot_20260929/pilot_report.json) and [current selection policy](/jumbo/yaoqingyang/kinshuk/Model-Zoo/docs/operations/analysis.md).
 
 Packed quantization also needs a declared interpretation. Stored-matrix descriptors, reconstructed effective weights, and measured deployed behavior are distinct evidence.
 
